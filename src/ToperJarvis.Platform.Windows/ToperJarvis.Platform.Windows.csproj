@@ -1,0 +1,12 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\ToperJarvis.Abstractions\ToperJarvis.Abstractions.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Nadpisuje net10.0 z Directory.Build.props — implementacje zależne od Windows -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+  </PropertyGroup>
+
+</Project>
