@@ -73,7 +73,12 @@ public sealed class JsonMemoryStore : IMemoryStore
         var dir = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
-        File.WriteAllText(_path, JsonSerializer.Serialize(memory, JsonOptions));
+
+        // Zapis atomowy: najpierw plik tymczasowy, potem podmiana — chroni przed uszkodzeniem
+        // pliku przy przerwaniu procesu w trakcie zapisu.
+        var tmp = _path + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(memory, JsonOptions));
+        File.Move(tmp, _path, overwrite: true);
     }
 
     private static void TrimToLimit(Dictionary<string, Dictionary<string, Entry>> memory)
@@ -111,7 +116,8 @@ public sealed class JsonMemoryStore : IMemoryStore
             memory[category][key] = new Entry
             {
                 Value = trimmed,
-                Updated = DateTimeOffset.Now.ToString("yyyy-MM-dd"),
+                // Pełny timestamp ISO 8601 UTC — zachowuje porządek leksykograficzny dla TrimToLimit.
+                Updated = DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
             };
             Save(memory);
         }
