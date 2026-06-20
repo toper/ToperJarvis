@@ -52,6 +52,16 @@ public sealed class PorcupineWakeWordDetector : IWakeWordDetector
             new[] { keyword },
             sensitivities: new[] { _options.Sensitivity });
 
+        if (_capture.SampleRate != _porcupine.SampleRate)
+        {
+            _logger.LogWarning(
+                "Niezgodny sample-rate audio: capture={Capture} Hz, Porcupine wymaga {Required} Hz — " +
+                "wykrywanie słowa-klucza wyłączone.", _capture.SampleRate, _porcupine.SampleRate);
+            _porcupine.Dispose();
+            _porcupine = null;
+            return;
+        }
+
         _frame = new short[_porcupine.FrameLength];
         _frameFill = 0;
         _capture.FrameAvailable += OnFrame;

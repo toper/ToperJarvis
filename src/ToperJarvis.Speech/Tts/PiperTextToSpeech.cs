@@ -58,6 +58,9 @@ public sealed class PiperTextToSpeech : ITextToSpeech
         using var process = new Process { StartInfo = psi };
         process.Start();
 
+        // Drenaż stderr równolegle — inaczej zapełniony bufor stderr mógłby zablokować proces.
+        var errorTask = process.StandardError.ReadToEndAsync(ct);
+
         await process.StandardInput.WriteLineAsync(text);
         process.StandardInput.Close();
 
@@ -67,7 +70,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech
 
         if (pcm.Length == 0)
         {
-            var err = await process.StandardError.ReadToEndAsync(ct);
+            var err = await errorTask;
             _logger.LogWarning("Piper nie zwrócił audio. stderr: {Err}", err);
             return;
         }
@@ -79,7 +82,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech
     private async Task PlayAsync(Stream pcm, CancellationToken ct)
     {
         var format = new WaveFormat(_sampleRate, 16, 1);
-        await using var reader = new RawSourceWaveStream(pcm, format);
+        using var reader = new RawSourceWaveStream(pcm, format);
         using var output = new WaveOutEvent();
         var tcs = new TaskCompletionSource();
 
@@ -87,7 +90,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech
         output.Init(reader);
         output.Play();
 
-        await using (ct.Register(() =>
+        using (ct.Register(() =>
         {
             output.Stop();
             tcs.TrySetCanceled();

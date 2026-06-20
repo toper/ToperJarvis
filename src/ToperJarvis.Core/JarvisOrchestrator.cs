@@ -157,33 +157,47 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
             var assistant = new System.Text.StringBuilder();
             var spoke = false;
 
-            await foreach (var update in _chat.GetStreamingResponseAsync(_history, options: null, ct))
+            try
             {
-                var delta = update.Text;
-                if (string.IsNullOrEmpty(delta))
-                    continue;
+                await foreach (var update in _chat.GetStreamingResponseAsync(_history, options: null, ct))
+                {
+                    var delta = update.Text;
+                    if (string.IsNullOrEmpty(delta))
+                        continue;
 
-                assistant.Append(delta);
-                foreach (var sentence in accumulator.Add(delta))
+                    assistant.Append(delta);
+                    foreach (var sentence in accumulator.Add(delta))
+                    {
+                        if (!spoke)
+                        {
+                            spoke = true;
+                            SetState(AssistantState.Speaking);
+                        }
+                        await ttsChannel.Writer.WriteAsync(sentence, ct);
+                    }
+                }
+
+                if (accumulator.Flush() is { } tail)
                 {
                     if (!spoke)
-                    {
-                        spoke = true;
                         SetState(AssistantState.Speaking);
-                    }
-                    await ttsChannel.Writer.WriteAsync(sentence, ct);
+                    await ttsChannel.Writer.WriteAsync(tail, ct);
                 }
             }
-
-            if (accumulator.Flush() is { } tail)
+            finally
             {
-                if (!spoke)
-                    SetState(AssistantState.Speaking);
-                await ttsChannel.Writer.WriteAsync(tail, ct);
+                // Zawsze domknij kanał i zaczekaj na workera, nawet przy wyjątku/anulowaniu —
+                // inaczej worker zawisłby na ReadAllAsync.
+                ttsChannel.Writer.TryComplete();
+                try
+                {
+                    await ttsWorker;
+                }
+                catch (OperationCanceledException)
+                {
+                    // anulowanie odtwarzania — ignorujemy
+                }
             }
-
-            ttsChannel.Writer.Complete();
-            await ttsWorker;
 
             var full = assistant.ToString().Trim();
             if (full.Length > 0)

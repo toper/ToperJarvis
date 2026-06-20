@@ -41,7 +41,7 @@ public class SentenceAccumulatorTests
     }
 
     [Fact]
-    public void Dziali_zdania_rozdzielone_pusta_linia()
+    public void Dzieli_zdania_rozdzielone_pusta_linia()
     {
         var acc = new SentenceAccumulator();
 
