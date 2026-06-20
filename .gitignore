@@ -1,0 +1,68 @@
+# === .NET ===
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+artifacts/
+project.lock.json
+project.fragment.lock.json
+
+# Build results
+*.dll
+*.exe
+*.pdb
+!assets/**/*.exe
+
+# Test results
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# === ToperJarvis: duże modele i runtime'y ===
+# Modele Whisper / Piper / Porcupine i pliki głosów trzymamy lokalnie, nie w repo.
+assets/models/
+assets/piper/*.onnx
+assets/piper/*.onnx.json
+assets/whisper/*.bin
+assets/voices/
+*.ppn
+
+# Sekrety / konfiguracja lokalna
+secret/
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json
+
+# Pamięć runtime
+**/memory/*.json
+!**/memory/.gitkeep
+
+# Referencyjny prototyp w Pythonie — NIE wersjonujemy w repo
+_Old/
+
+# Python (środowisko _Old)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# System
+Thumbs.db
+.DS_Store
