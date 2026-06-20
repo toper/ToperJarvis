@@ -8,7 +8,23 @@
     <Application.DataTemplates>
         <local:ViewLocator/>
     </Application.DataTemplates>
-  
+
+    <TrayIcon.Icons>
+        <TrayIcons>
+            <TrayIcon Icon="/Assets/avalonia-logo.ico" ToolTipText="ToperJarvis"
+                      Clicked="OnTrayShow">
+                <TrayIcon.Menu>
+                    <NativeMenu>
+                        <NativeMenuItem Header="Pokaż" Click="OnTrayShow"/>
+                        <NativeMenuItem Header="Pełny ekran" Click="OnTrayFullscreen"/>
+                        <NativeMenuItemSeparator/>
+                        <NativeMenuItem Header="Wyjście" Click="OnTrayExit"/>
+                    </NativeMenu>
+                </TrayIcon.Menu>
+            </TrayIcon>
+        </TrayIcons>
+    </TrayIcon.Icons>
+
     <Application.Styles>
         <FluentTheme />
     </Application.Styles>

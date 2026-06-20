@@ -3,18 +3,46 @@
         xmlns:vm="using:ToperJarvis.App.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="700"
         x:Class="ToperJarvis.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Icon="/Assets/avalonia-logo.ico"
-        Title="ToperJarvis.App">
+        Width="980" Height="700"
+        Background="#0B0F1A"
+        Title="ToperJarvis">
 
     <Design.DataContext>
-        <!-- This only sets the DataContext for the previewer in an IDE,
-             to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <TextBlock Text="{Binding Greeting}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    <Grid RowDefinitions="Auto,*,Auto" Margin="24">
 
+        <!-- Nagłówek: stan asystenta -->
+        <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
+            <TextBlock Text="JARVIS" FontSize="28" FontWeight="Bold" Foreground="#4FC3F7"/>
+            <TextBlock Text="{Binding StateText}" FontSize="16" Foreground="#B0BEC5"/>
+        </StackPanel>
+
+        <!-- Transkrypt konwersacji -->
+        <Border Grid.Row="1" Background="#111827" CornerRadius="8" Padding="12">
+            <ScrollViewer>
+                <ItemsControl ItemsSource="{Binding Transcript}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" TextWrapping="Wrap"
+                                       Foreground="#ECEFF1" Margin="0,4"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Wejście tekstowe -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,16,0,0">
+            <TextBox Grid.Column="0" Text="{Binding InputText}"
+                     Watermark="Wpisz komendę…" FontSize="14"
+                     KeyDown="OnInputKeyDown"/>
+            <Button Grid.Column="1" Content="Wyślij" Margin="8,0,0,0"
+                    Command="{Binding SendCommand}"/>
+        </Grid>
+    </Grid>
 </Window>
