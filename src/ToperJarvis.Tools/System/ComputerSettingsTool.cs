@@ -24,7 +24,7 @@ public sealed class ComputerSettingsTool : IJarvisTool
             "Dla volume_up/volume_down można podać liczbę kroków.");
 
     [Description("Zmienia ustawienia systemu (głośność).")]
-    internal string Execute(
+    private string Execute(
         [Description("Akcja: volume_up, volume_down lub mute.")] string action,
         [Description("Liczba kroków zmiany głośności (dla volume_up/volume_down).")] int steps = 2)
     {
@@ -39,10 +39,11 @@ public sealed class ComputerSettingsTool : IJarvisTool
             keybd_event(key.Value, 0, KeyUp, UIntPtr.Zero);
         }
 
-        return action.Trim().ToLowerInvariant() switch
+        // Komunikat na podstawie ROZPOZNANEGO klawisza (nie surowej akcji) — poprawne dla aliasów.
+        return key.Value switch
         {
-            "mute" => "Przełączono wyciszenie.",
-            "volume_up" => "Zwiększono głośność.",
+            VkVolumeMute => "Przełączono wyciszenie.",
+            VkVolumeUp => "Zwiększono głośność.",
             _ => "Zmniejszono głośność.",
         };
     }
