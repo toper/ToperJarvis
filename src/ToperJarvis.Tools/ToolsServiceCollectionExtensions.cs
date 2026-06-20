@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using ToperJarvis.Abstractions.Tools;
+using ToperJarvis.Tools.Dev;
 using ToperJarvis.Tools.Memory;
 using ToperJarvis.Tools.System;
 using ToperJarvis.Tools.Web;
@@ -24,8 +25,9 @@ public static class ToolsServiceCollectionExtensions
         services.AddSingleton<IJarvisTool, GameUpdaterTool>();
         services.AddSingleton<IJarvisTool, SendMessageTool>();
         services.AddSingleton<IJarvisTool, BrowserControlTool>();
+        services.AddSingleton<IJarvisTool, CodeHelperTool>();
 
-        // TODO (Krok 11): kolejne narzędzia (screen_process, file_processor, dev_agent)
+        // TODO (Krok 11): kolejne narzędzia (screen_process, file_processor [wizja], dev_agent [wieloplikowy])
         return services;
     }
 }
