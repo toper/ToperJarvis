@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ToperJarvis.Abstractions;
+using ToperJarvis.App.Services;
 
 namespace ToperJarvis.App.ViewModels;
 
@@ -15,18 +16,29 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _stateText = "Bezczynny";
 
     [ObservableProperty]
+    private AssistantState _state = AssistantState.Idle;
+
+    [ObservableProperty]
     private string _inputText = string.Empty;
 
     public ObservableCollection<string> Transcript { get; } = new();
 
-    // Konstruktor projektowy (podgląd w IDE).
-    public MainWindowViewModel() : this(new DesignOrchestrator()) { }
+    /// <summary>Metryki systemu dla HUD (CPU/RAM).</summary>
+    public SystemMetricsService Metrics { get; }
 
-    public MainWindowViewModel(IAssistantOrchestrator orchestrator)
+    // Konstruktor projektowy (podgląd w IDE).
+    public MainWindowViewModel() : this(new DesignOrchestrator(), new SystemMetricsService()) { }
+
+    public MainWindowViewModel(IAssistantOrchestrator orchestrator, SystemMetricsService metrics)
     {
         _orchestrator = orchestrator;
+        Metrics = metrics;
         _orchestrator.StateChanged += (_, state) =>
-            Dispatcher.UIThread.Post(() => StateText = Describe(state));
+            Dispatcher.UIThread.Post(() =>
+            {
+                State = state;
+                StateText = Describe(state);
+            });
         _orchestrator.TranscriptAdded += (_, entry) =>
             Dispatcher.UIThread.Post(() => Transcript.Add($"{Prefix(entry.Role)} {entry.Text}"));
     }

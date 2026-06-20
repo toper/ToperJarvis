@@ -13,7 +13,8 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddJarvisApp(this IServiceCollection services)
     {
-        // ViewModele
+        // Metryki systemu (HUD) + ViewModele
+        services.AddSingleton<Services.SystemMetricsService>();
         services.AddSingleton<MainWindowViewModel>();
 
         // Warstwa mowy: audio, wake-word, STT, TTS
