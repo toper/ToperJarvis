@@ -1,0 +1,10 @@
+﻿<Project Sdk="Microsoft.NET.Sdk"><!-- TargetFramework, Nullable, ImplicitUsings dziedziczone z Directory.Build.props -->
+
+
+  <ItemGroup>
+    <ProjectReference Include="..\ToperJarvis.Abstractions\ToperJarvis.Abstractions.csproj" />
+    <ProjectReference Include="..\ToperJarvis.Llm\ToperJarvis.Llm.csproj" />
+    <ProjectReference Include="..\ToperJarvis.Speech\ToperJarvis.Speech.csproj" />
+    <ProjectReference Include="..\ToperJarvis.Tools\ToperJarvis.Tools.csproj" />
+  </ItemGroup>
+</Project>

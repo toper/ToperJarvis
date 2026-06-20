@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ToperJarvis.Abstractions/ToperJarvis.Abstractions.csproj" />
+    <Project Path="src/ToperJarvis.App/ToperJarvis.App.csproj" />
+    <Project Path="src/ToperJarvis.Core/ToperJarvis.Core.csproj" />
+    <Project Path="src/ToperJarvis.Llm/ToperJarvis.Llm.csproj" />
+    <Project Path="src/ToperJarvis.Platform.Windows/ToperJarvis.Platform.Windows.csproj" />
+    <Project Path="src/ToperJarvis.Speech/ToperJarvis.Speech.csproj" />
+    <Project Path="src/ToperJarvis.Tools/ToperJarvis.Tools.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ToperJarvis.Core.Tests/ToperJarvis.Core.Tests.csproj" />
+    <Project Path="tests/ToperJarvis.Tools.Tests/ToperJarvis.Tools.Tests.csproj" />
+  </Folder>
+</Solution>
