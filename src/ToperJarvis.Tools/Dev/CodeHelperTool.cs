@@ -1,6 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using ToperJarvis.Abstractions.Tools;
@@ -13,7 +11,7 @@ namespace ToperJarvis.Tools.Dev;
 /// części <c>_Old/actions/code_helper.py</c>. Akcja <c>screen_debug</c> (wizja) oraz generator
 /// wieloplikowy <c>dev_agent</c> — w osobnym kroku. UWAGA: akcje run/build wykonują wygenerowany kod.
 /// </summary>
-public sealed partial class CodeHelperTool : IJarvisTool
+public sealed class CodeHelperTool : IJarvisTool
 {
     private const int MaxBuildAttempts = 3;
     private const int DefaultTimeoutSeconds = 30;
@@ -275,73 +273,19 @@ public sealed partial class CodeHelperTool : IJarvisTool
         return clean;
     }
 
-    private async Task<string> AskLlmAsync(string system, string user, CancellationToken ct)
-    {
-        var response = await _chat.GetResponseAsync(
-            [new ChatMessage(ChatRole.System, system), new ChatMessage(ChatRole.User, user)],
-            cancellationToken: ct);
-        return response.Text;
-    }
+    private Task<string> AskLlmAsync(string system, string user, CancellationToken ct) =>
+        CodeWorkshop.AskLlmAsync(_chat, system, user, ct);
 
     /// <summary>Uruchamia plik właściwym interpreterem. Zwraca wyjście i czy zakończono sukcesem (exit code 0).</summary>
-    private async Task<(string Output, bool Ok)> RunFileAsync(string filePath, int timeoutSeconds, CancellationToken ct)
+    private Task<(string Output, bool Ok)> RunFileAsync(string filePath, int timeoutSeconds, CancellationToken ct)
     {
         var ext = Path.GetExtension(filePath);
         if (!InterpreterByExtension.TryGetValue(ext, out var interpreter))
-            return ($"Brak interpretera dla rozszerzenia {ext}.", false);
+            return Task.FromResult(($"Brak interpretera dla rozszerzenia {ext}.", false));
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = interpreter[0],
-            WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(filePath)),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        foreach (var part in interpreter.Skip(1))
-            psi.ArgumentList.Add(part);
-        psi.ArgumentList.Add(filePath);
-
-        try
-        {
-            using var process = Process.Start(psi);
-            if (process is null)
-                return ("Nie udało się uruchomić procesu.", false);
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-            // Czytamy strumienie z tym samym tokenem co WaitForExit, by timeout zwijał też odczyt.
-            var stdout = process.StandardOutput.ReadToEndAsync(cts.Token);
-            var stderr = process.StandardError.ReadToEndAsync(cts.Token);
-
-            try
-            {
-                await process.WaitForExitAsync(cts.Token);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                try { process.Kill(entireProcessTree: true); } catch { /* już zakończony */ }
-                return ($"Przekroczono limit czasu ({timeoutSeconds}s).", false);
-            }
-
-            var output = (await stdout).Trim();
-            var error = (await stderr).Trim();
-            var parts = new List<string>();
-            if (output.Length > 0) parts.Add($"Wynik:\n{output}");
-            if (error.Length > 0) parts.Add($"Stderr:\n{error}");
-            var text = parts.Count > 0 ? string.Join("\n\n", parts) : "Wykonano bez wyjścia.";
-            return (text, process.ExitCode == 0);
-        }
-        catch (Exception ex) when (ex is Win32Exception or FileNotFoundException)
-        {
-            return ($"Nie znaleziono interpretera: {interpreter[0]}.", false);
-        }
-        catch (Exception ex)
-        {
-            return ($"Błąd wykonania: {ex.Message}", false);
-        }
+        var args = interpreter.Skip(1).Append(filePath);
+        var workingDir = Path.GetDirectoryName(Path.GetFullPath(filePath));
+        return CodeWorkshop.RunProcessAsync(interpreter[0], args, workingDir, timeoutSeconds, _logger, ct);
     }
 
     private async Task<string?> ResolveCodeAsync(string? filePath, string? code, CancellationToken ct)
@@ -378,13 +322,7 @@ public sealed partial class CodeHelperTool : IJarvisTool
     }
 
     /// <summary>Usuwa ogradzające bloki markdown (```lang ... ```) z odpowiedzi LLM.</summary>
-    internal static string CleanCode(string text)
-    {
-        text = text.Trim();
-        text = FenceStart().Replace(text, "");
-        text = FenceEnd().Replace(text, "");
-        return text.Trim();
-    }
+    internal static string CleanCode(string text) => CodeWorkshop.CleanCode(text);
 
     /// <summary>
     /// Ścieżka zapisu: absolutna bez zmian; względna → względem pulpitu; pusta → pulpit (nazwa wg języka).
@@ -450,12 +388,6 @@ public sealed partial class CodeHelperTool : IJarvisTool
     }
 
     private static string Truncate(string text, int max) => text.Length > max ? text[..max] : text;
-
-    [GeneratedRegex(@"^```[a-zA-Z]*\n?")]
-    private static partial Regex FenceStart();
-
-    [GeneratedRegex(@"\n?```$")]
-    private static partial Regex FenceEnd();
 
     /// <summary>Sygnalizuje, że LLM nie dostarczył użytecznego kodu — wołający NIE zapisuje pliku.</summary>
     private sealed class CodeGenerationException(string message) : Exception(message);
