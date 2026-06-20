@@ -23,8 +23,9 @@ public static class ToolsServiceCollectionExtensions
         services.AddSingleton<IJarvisTool, ComputerControlTool>();
         services.AddSingleton<IJarvisTool, GameUpdaterTool>();
         services.AddSingleton<IJarvisTool, SendMessageTool>();
+        services.AddSingleton<IJarvisTool, BrowserControlTool>();
 
-        // TODO (Krok 11): kolejne narzędzia (browser_control, screen_process, file_processor, dev_agent)
+        // TODO (Krok 11): kolejne narzędzia (screen_process, file_processor, dev_agent)
         return services;
     }
 }

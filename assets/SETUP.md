@@ -36,6 +36,15 @@ dotnet run
 ```
 Okno otworzy się i pojawi ikona w trayu. Powiedz „Jarvis", potem komendę — albo wpisz komendę w polu tekstowym i Enter.
 
+## Narzędzia opcjonalne
+
+- **`browser_control`** (sterowanie przeglądarką) używa Playwright. Przy pierwszym użyciu pobierz
+  binaria przeglądarki: w katalogu projektu `dotnet build`, a następnie
+  `pwsh bin/Debug/net10.0/playwright.ps1 install chromium` (lub `playwright install chromium`,
+  jeśli masz CLI Playwrighta). Domyślnie używany jest dedykowany profil w
+  `%LOCALAPPDATA%\ToperJarvis\browser`; aby użyć realnego profilu/zainstalowanej przeglądarki,
+  ustaw `Jarvis:Browser:UserDataDir` i `Jarvis:Browser:Channel` (`chrome`/`msedge`).
+
 ## Docelowa zawartość assets/
 ```
 assets/
