@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Avalonia.Controls;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -19,6 +20,12 @@ public sealed partial class SystemMetricsService : ObservableObject, IDisposable
 
     public SystemMetricsService()
     {
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+
+        // W trybie projektanta XAML nie uruchamiamy liczników ani timera.
+        if (Design.IsDesignMode)
+            return;
+
         try
         {
             _cpu = new PerformanceCounter("Processor", "% Processor Time", "_Total");
@@ -29,7 +36,6 @@ public sealed partial class SystemMetricsService : ObservableObject, IDisposable
             _cpu = null; // brak licznika (np. uprawnienia) — CPU pozostanie 0
         }
 
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) => Update();
         _timer.Start();
     }

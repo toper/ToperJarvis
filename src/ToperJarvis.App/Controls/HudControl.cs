@@ -130,7 +130,7 @@ public sealed class HudControl : Control
         {
             using var font = new SKFont { Size = 13 };
             using var paint = new SKPaint { Color = new SKColor(0xB0, 0xBE, 0xC5), IsAntialias = true };
-            canvas.DrawText($"CPU: {cpu:0}%   RAM: {ram:0}%", 12, h - 12, SKTextAlign.Left, font, paint);
+            canvas.DrawText($"CPU: {cpu:0}%   RAM: {ram:0}%", 12, h - 12, font, paint);
         }
 
         private static SKColor StateColor(AssistantState state) => state switch
