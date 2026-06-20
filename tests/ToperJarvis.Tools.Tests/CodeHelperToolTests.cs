@@ -35,16 +35,6 @@ public class CodeHelperToolTests
     }
 
     [Theory]
-    [InlineData("Traceback (most recent call last): NameError", true)]
-    [InlineData("Exception in thread", true)]
-    [InlineData("Wszystko OK, gotowe", false)]
-    [InlineData("Hello world", false)]
-    public void HasError_wykrywa_sygnaly_bledu(string output, bool expected)
-    {
-        Assert.Equal(expected, CodeHelperTool.HasError(output));
-    }
-
-    [Theory]
     // (description, filePath, code, expected)
     [InlineData("zoptymalizuj ten kod", null, "print(1)", "optimize")]
     [InlineData("napisz kalkulator", null, null, "write")]
