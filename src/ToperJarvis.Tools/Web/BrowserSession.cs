@@ -9,8 +9,10 @@ namespace ToperJarvis.Tools.Web;
 /// przy pierwszej akcji; dostęp serializowany (jeden bufor zdarzeń UI). Port logiki
 /// <c>_BrowserSession</c> z <c>_Old/actions/browser_control.py</c> (jedna przeglądarka, bez rejestru wielu).
 /// </summary>
-internal sealed class BrowserSession : IAsyncDisposable
+internal sealed class BrowserSession : IAsyncDisposable, IDisposable
 {
+    private const int GotoTimeoutMs = 30_000;
+
     private readonly BrowserOptions _options;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -45,6 +47,63 @@ internal sealed class BrowserSession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Nawiguje do adresu (z leniwym startem). Gdy strona pozostaje pusta, a poprzednia też była pusta,
+    /// ponawia na świeżej karcie — odwzorowanie zabezpieczenia oryginału na quirk „about:blank".
+    /// </summary>
+    public async Task<string> GoToAsync(string url, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var page = await EnsurePageAsync();
+            var previousUrl = page.Url;
+
+            var resultUrl = await TryGotoAsync(page, url);
+            if (IsBlank(resultUrl) && IsBlank(previousUrl))
+            {
+                _logger.LogDebug("Pusta strona po nawigacji — ponawiam na nowej karcie: {Url}.", url);
+                _page = await _context!.NewPageAsync();
+                resultUrl = await TryGotoAsync(_page, url);
+            }
+
+            return IsBlank(resultUrl) ? $"Nie udało się otworzyć: {url}." : $"Otwarto: {resultUrl}.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Błąd nawigacji do {Url}.", url);
+            return $"Błąd przeglądarki: {ex.Message}";
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<string> TryGotoAsync(IPage page, string url)
+    {
+        try
+        {
+            await page.GotoAsync(url, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = GotoTimeoutMs,
+            });
+        }
+        catch (TimeoutException)
+        {
+            // strona mogła załadować się częściowo — weryfikujemy przez URL
+        }
+        catch (PlaywrightException ex)
+        {
+            _logger.LogDebug(ex, "Nawigacja do {Url} zgłosiła błąd (nie-fatalny).", url);
+        }
+
+        return page.Url;
+    }
+
+    private static bool IsBlank(string? url) => string.IsNullOrEmpty(url) || url == "about:blank";
+
     /// <summary>Otwiera nową kartę (opcjonalnie pod adresem) i czyni ją aktywną.</summary>
     public async Task<string> NewTabAsync(string url, CancellationToken ct)
     {
@@ -59,6 +118,7 @@ internal sealed class BrowserSession : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Błąd otwierania nowej karty ({Url}).", url);
             return $"Błąd przeglądarki: {ex.Message}";
         }
         finally
@@ -149,6 +209,16 @@ internal sealed class BrowserSession : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await DisposeContextAsync();
+        _gate.Dispose();
+    }
+
+    /// <summary>
+    /// Synchroniczne zamknięcie — kontener DI dysponowany jest synchronicznie (<c>_host.Dispose()</c>),
+    /// a typ wyłącznie <see cref="IAsyncDisposable"/> rzuciłby wtedy wyjątek i nie zwolnił Chromium.
+    /// </summary>
+    public void Dispose()
+    {
+        DisposeContextAsync().GetAwaiter().GetResult();
         _gate.Dispose();
     }
 }

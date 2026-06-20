@@ -15,7 +15,7 @@ namespace ToperJarvis.Tools.Web;
 /// bez rejestru wielu przeglądarek). Akcje „smart" lokalizują elementy po dostępności (role/label),
 /// bez wizji.
 /// </summary>
-public sealed class BrowserControlTool : IJarvisTool, IAsyncDisposable
+public sealed class BrowserControlTool : IJarvisTool, IAsyncDisposable, IDisposable
 {
     private static readonly IReadOnlyDictionary<string, string> SearchEngines =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -27,7 +27,6 @@ public sealed class BrowserControlTool : IJarvisTool, IAsyncDisposable
         };
 
     private const int ClickTimeoutMs = 8_000;
-    private const int GotoTimeoutMs = 30_000;
     private const int MaxTextLength = 4_000;
 
     private readonly BrowserSession _session;
@@ -66,10 +65,10 @@ public sealed class BrowserControlTool : IJarvisTool, IAsyncDisposable
         switch (action?.Trim().ToLowerInvariant())
         {
             case "go_to":
-                return _session.RunAsync(p => GoToAsync(p, NormalizeUrl(url ?? "")), cancellationToken);
+                return _session.GoToAsync(NormalizeUrl(url ?? ""), cancellationToken);
 
             case "search":
-                return _session.RunAsync(p => GoToAsync(p, SearchUrl(query ?? "", engine)), cancellationToken);
+                return _session.GoToAsync(SearchUrl(query ?? "", engine), cancellationToken);
 
             case "click":
                 return _session.RunAsync(p => ClickAsync(p, selector, text), cancellationToken);
@@ -143,27 +142,6 @@ public sealed class BrowserControlTool : IJarvisTool, IAsyncDisposable
         }
     }
 
-    private async Task<string> GoToAsync(IPage page, string url)
-    {
-        try
-        {
-            await page.GotoAsync(url, new PageGotoOptions
-            {
-                WaitUntil = WaitUntilState.DOMContentLoaded,
-                Timeout = GotoTimeoutMs,
-            });
-        }
-        catch (TimeoutException)
-        {
-            // strona mogła załadować się częściowo — sprawdzamy URL poniżej
-        }
-
-        var current = page.Url;
-        return current is "about:blank" or ""
-            ? $"Nie udało się otworzyć: {url}."
-            : $"Otwarto: {current}.";
-    }
-
     private async Task<string> ClickAsync(IPage page, string? selector, string? text)
     {
         if (!string.IsNullOrWhiteSpace(text))
@@ -185,10 +163,18 @@ public sealed class BrowserControlTool : IJarvisTool, IAsyncDisposable
     private async Task<string> TypeAsync(IPage page, string? selector, string text, bool clearFirst)
     {
         var element = string.IsNullOrWhiteSpace(selector) ? page.Locator(":focus") : page.Locator(selector).First;
-        if (clearFirst)
-            await element.ClearAsync();
-        await element.PressSequentiallyAsync(text, new LocatorPressSequentiallyOptions { Delay = 50 });
-        return "Wpisano tekst.";
+        try
+        {
+            if (clearFirst)
+                await element.ClearAsync();
+            await element.PressSequentiallyAsync(text, new LocatorPressSequentiallyOptions { Delay = 50 });
+            return "Wpisano tekst.";
+        }
+        catch (PlaywrightException ex)
+        {
+            // m.in. brak fokusu na polu edycji (selektor pusty → :focus wskazuje <body>)
+            return $"Nie udało się wpisać tekstu: {ex.Message}";
+        }
     }
 
     private async Task<string> FillFormAsync(IPage page, Dictionary<string, string>? fields)
@@ -287,4 +273,6 @@ public sealed class BrowserControlTool : IJarvisTool, IAsyncDisposable
     }
 
     public ValueTask DisposeAsync() => _session.DisposeAsync();
+
+    public void Dispose() => _session.Dispose();
 }
