@@ -10,6 +10,8 @@ public class BrowserControlToolTests
     [InlineData("https://example.com/x", "https://example.com/x")] // pełny URL bez zmian
     [InlineData("http://localhost:8080", "http://localhost:8080")]
     [InlineData("", "about:blank")]                              // pusty → about:blank
+    [InlineData("file:///C:/Windows/system.ini", "about:blank")] // groźny schemat → odrzucony
+    [InlineData("ftp://example.com/x", "about:blank")]           // nie-http → odrzucony
     public void NormalizeUrl_mapuje_poprawnie(string input, string expected)
     {
         Assert.Equal(expected, BrowserControlTool.NormalizeUrl(input));

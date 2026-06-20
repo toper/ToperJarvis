@@ -113,7 +113,16 @@ public sealed partial class CodeHelperTool : IJarvisTool
         if (!File.Exists(filePath))
             return $"Nie znaleziono pliku: {filePath}";
 
-        var content = await File.ReadAllTextAsync(filePath, ct);
+        string content;
+        try
+        {
+            content = await File.ReadAllTextAsync(filePath, ct);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"Nie udało się odczytać pliku ({filePath}): {ex.Message}";
+        }
+
         const string system = "Jesteś ekspertem edycji kodu. Zwróć WYŁĄCZNIE kompletny zaktualizowany kod — bez wyjaśnień, bez markdown, bez backticków.";
         var prompt = $"Zastosuj poniższą zmianę do kodu.\n\nZmiana: {instruction}\n\nKod:\n{content}\n\nZaktualizowany kod:";
 
@@ -172,18 +181,17 @@ public sealed partial class CodeHelperTool : IJarvisTool
         var prompt = $"Zoptymalizuj ten kod {lang} pod kątem wydajności, czytelności i dobrych praktyk. " +
                      $"Usuń martwy kod i zbędną złożoność.\n\nKod:\n{Truncate(code, 6000)}\n\nZoptymalizowany kod:";
 
-        string optimized;
+        string optimized, savePath;
         try
         {
             optimized = await GenerateCodeAsync(system, prompt, ct);
+            savePath = !string.IsNullOrWhiteSpace(filePath) ? filePath : ResolveSavePath(outputPath, lang);
+            await SaveAsync(savePath, optimized, ct);
         }
         catch (CodeGenerationException ex)
         {
             return $"{ex.Message} Plik nietknięty.";
         }
-
-        var savePath = !string.IsNullOrWhiteSpace(filePath) ? filePath : ResolveSavePath(outputPath, lang);
-        await SaveAsync(savePath, optimized, ct);
 
         var before = CountLines(code);
         var after = CountLines(optimized);
@@ -339,16 +347,34 @@ public sealed partial class CodeHelperTool : IJarvisTool
     private async Task<string?> ResolveCodeAsync(string? filePath, string? code, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
-            return await File.ReadAllTextAsync(filePath, ct);
+        {
+            try
+            {
+                return await File.ReadAllTextAsync(filePath, ct);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Nie udało się odczytać pliku {Path}.", filePath);
+                return null;
+            }
+        }
         return code;
     }
 
     private async Task SaveAsync(string path, string content, CancellationToken ct)
     {
-        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(path, content, ct);
+        try
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+            await File.WriteAllTextAsync(path, content, ct);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Spójnie z oryginałem: błąd zapisu → przyjazny komunikat zamiast nieobsłużonego wyjątku.
+            throw new CodeGenerationException($"Nie udało się zapisać pliku ({path}): {ex.Message}");
+        }
     }
 
     /// <summary>Usuwa ogradzające bloki markdown (```lang ... ```) z odpowiedzi LLM.</summary>
