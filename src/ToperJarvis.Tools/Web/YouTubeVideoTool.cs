@@ -13,6 +13,9 @@ namespace ToperJarvis.Tools.Web;
 /// </summary>
 public sealed class YouTubeVideoTool : IJarvisTool
 {
+    private const string Home = "https://www.youtube.com";
+    private const string Trending = "https://www.youtube.com/feed/trending";
+
     private readonly ILogger<YouTubeVideoTool> _logger;
 
     public YouTubeVideoTool(ILogger<YouTubeVideoTool> logger) => _logger = logger;
@@ -28,21 +31,14 @@ public sealed class YouTubeVideoTool : IJarvisTool
     private string Execute(
         [Description("Akcja: play, search lub trending.")] string action = "search",
         [Description("Fraza do wyszukania (dla play/search).")] string? query = null,
-        [Description("Bezpośredni adres URL filmu (opcjonalnie).")] string? url = null)
+        [Description("Bezpośredni adres URL filmu w serwisie YouTube (opcjonalnie).")] string? url = null)
     {
-        var target = (action ?? "search").Trim().ToLowerInvariant() switch
-        {
-            "trending" => "https://www.youtube.com/feed/trending",
-            _ when !string.IsNullOrWhiteSpace(url) => NormalizeUrl(url!),
-            _ when !string.IsNullOrWhiteSpace(query) =>
-                "https://www.youtube.com/results?search_query=" + WebUtility.UrlEncode(query),
-            _ => "https://www.youtube.com",
-        };
+        var target = BuildTarget(action, query, url);
 
         try
         {
             Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
-            return query is not null ? $"Otwieram YouTube: {query}." : "Otwieram YouTube.";
+            return Describe(target, query);
         }
         catch (Exception ex)
         {
@@ -51,6 +47,49 @@ public sealed class YouTubeVideoTool : IJarvisTool
         }
     }
 
-    private static string NormalizeUrl(string url) =>
-        url.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? url : "https://" + url;
+    /// <summary>Wyznacza adres do otwarcia na podstawie akcji, frazy i (zwalidowanego) URL.</summary>
+    internal static string BuildTarget(string? action, string? query, string? url)
+    {
+        if (string.Equals(action?.Trim(), "trending", StringComparison.OrdinalIgnoreCase))
+            return Trending;
+
+        if (!string.IsNullOrWhiteSpace(url) && IsYouTubeUrl(url, out var normalized))
+            return normalized;
+
+        if (!string.IsNullOrWhiteSpace(query))
+            return "https://www.youtube.com/results?search_query=" + WebUtility.UrlEncode(query.Trim());
+
+        return Home;
+    }
+
+    /// <summary>Akceptuje wyłącznie adresy http/https w domenie youtube.com / youtu.be.</summary>
+    internal static bool IsYouTubeUrl(string url, out string normalized)
+    {
+        normalized = Home;
+        var candidate = url.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? url : "https://" + url;
+
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
+            return false;
+
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            return false;
+
+        var host = uri.Host.ToLowerInvariant();
+        var ok = host is "youtube.com" or "youtu.be"
+                 || host.EndsWith(".youtube.com", StringComparison.Ordinal);
+        if (!ok)
+            return false;
+
+        normalized = uri.ToString();
+        return true;
+    }
+
+    private static string Describe(string target, string? query)
+    {
+        if (target == Trending)
+            return "Otwieram trendy YouTube.";
+        if (!string.IsNullOrWhiteSpace(query))
+            return $"Otwieram YouTube: {query.Trim()}.";
+        return "Otwieram YouTube.";
+    }
 }
