@@ -15,7 +15,7 @@ w trybie okienkowym lub pełnoekranowym i nasłuchuje komend głosowych po wykry
 | Obszar | Technologia |
 |---|---|
 | UI | Avalonia 12 (MVVM), SkiaSharp HUD, wbudowany TrayIcon |
-| Wake-word | Picovoice Porcupine („Jarvis") |
+| Wake-word | openWakeWord („hey jarvis", open-source, bez klucza) — opcjonalnie Picovoice Porcupine |
 | STT | Whisper.net (offline) |
 | TTS | Piper (głos polski — Geralt) |
 | LLM | vLLM / Qwen3 (API zgodne z OpenAI) `http://192.168.7.30:8000` |
@@ -43,8 +43,23 @@ assets/                        — modele, ikony, prompt (poza repo)
 - Endpoint vLLM (Qwen3) pod `http://192.168.7.30:8000/v1`
 - Model Whisper w `assets/whisper/`
 - `piper.exe` + głos w `assets/piper/`
-- AccessKey Picovoice (Porcupine) w `appsettings.Local.json`
+- Wake-word („hey jarvis") działa od razu — modele openWakeWord są wbudowane, **bez klucza**.
+  AccessKey Picovoice jest potrzebny tylko, gdy ustawisz `WakeWord:Engine = porcupine`.
+
+Szczegółowa instrukcja dostarczenia plików lokalnych (Whisper, Piper + głos) — zob. [`assets/SETUP.md`](assets/SETUP.md).
+
+## Uruchomienie
+
+```powershell
+cd src\ToperJarvis.App
+dotnet run
+```
+
+Otworzy się okno i pojawi ikona w trayu. Powiedz „hey jarvis", potem komendę — albo wpisz
+komendę w polu tekstowym i Enter. Konfigurację lokalną (ścieżki modeli, endpoint LLM) trzymaj
+w `appsettings.Local.json` (poza repo) — przykład w `appsettings.Local.example.json`.
 
 ## Status
 
-🚧 Projekt w aktywnym rozwoju.
+🚧 W aktywnym rozwoju. Pełna pętla głosowa (wake-word → STT → LLM → narzędzia → TTS) działa
+lokalnie po dostarczeniu modeli Whisper/Piper i uruchomieniu endpointu vLLM.

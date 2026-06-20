@@ -38,8 +38,9 @@ coverage*.info
 # === ToperJarvis: duże modele i runtime'y ===
 # Modele Whisper / Piper / Porcupine i pliki głosów trzymamy lokalnie, nie w repo.
 assets/models/
-assets/piper/*.onnx
-assets/piper/*.onnx.json
+# Cały runtime Pipera (piper.exe, DLL-ki, espeak-ng-data, głosy) — lokalnie, nie w repo.
+assets/piper/*
+!assets/piper/.gitkeep
 assets/whisper/*.bin
 assets/voices/
 *.ppn
