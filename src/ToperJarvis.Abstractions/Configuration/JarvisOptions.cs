@@ -14,6 +14,26 @@ public sealed class JarvisOptions
     public TtsOptions Tts { get; set; } = new();
     public WakeWordOptions WakeWord { get; set; } = new();
     public AudioOptions Audio { get; set; } = new();
+    public BrowserOptions Browser { get; set; } = new();
+}
+
+/// <summary>Sterowanie przeglądarką (narzędzie browser_control, Playwright).</summary>
+public sealed class BrowserOptions
+{
+    /// <summary>
+    /// Katalog trwałego profilu przeglądarki. Pusty = dedykowany profil w
+    /// <c>%LOCALAPPDATA%\ToperJarvis\browser</c>. Aby użyć realnego profilu, wskaż katalog
+    /// „User Data" zainstalowanej przeglądarki (wymaga jej zamknięcia — blokada profilu).
+    /// </summary>
+    public string UserDataDir { get; set; } = "";
+
+    /// <summary>
+    /// Kanał przeglądarki: "chrome" lub "msedge" (zainstalowana), pusty = wbudowany Chromium Playwright.
+    /// </summary>
+    public string Channel { get; set; } = "";
+
+    /// <summary>Tryb bez okna. Domyślnie false — asystent działa na widocznym pulpicie.</summary>
+    public bool Headless { get; set; }
 }
 
 /// <summary>Zdalny LLM — vLLM z API zgodnym z OpenAI.</summary>
