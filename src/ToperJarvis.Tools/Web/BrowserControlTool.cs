@@ -252,14 +252,23 @@ public sealed class BrowserControlTool : IJarvisTool, IAsyncDisposable, IDisposa
         return $"Nie znaleziono pola: '{description}'.";
     }
 
-    /// <summary>Goła nazwa („instagram") → „https://instagram.com"; domena → https://; pełny URL bez zmian.</summary>
+    /// <summary>
+    /// Goła nazwa („instagram") → „https://instagram.com"; domena → https://; pełny URL http(s) bez zmian.
+    /// Schematy inne niż http/https/about (np. file://, ftp://) są odrzucane → „about:blank",
+    /// by narzędzie sterowane przez LLM nie czytało plików lokalnych ani nie wykonywało pseudo-URL.
+    /// </summary>
     internal static string NormalizeUrl(string url)
     {
         url = url.Trim();
         if (url.Length == 0)
             return "about:blank";
         if (url.Contains("://", StringComparison.Ordinal))
-            return url;
+        {
+            return url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                   url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                ? url
+                : "about:blank";
+        }
         if (!url.Contains('.'))
             url += ".com";
         return "https://" + url;
