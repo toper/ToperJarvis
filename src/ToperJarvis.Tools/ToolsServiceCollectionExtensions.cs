@@ -17,6 +17,7 @@ public static class ToolsServiceCollectionExtensions
         services.AddSingleton<IJarvisTool, WebSearchTool>();
         services.AddSingleton<IJarvisTool, FileControllerTool>();
         services.AddSingleton<IJarvisTool, ReminderTool>();
+        services.AddSingleton<IJarvisTool, YouTubeVideoTool>();
 
         // TODO (Krok 9-11): kolejne narzędzia (computer_settings, browser_control, computer_control, ...)
         return services;
