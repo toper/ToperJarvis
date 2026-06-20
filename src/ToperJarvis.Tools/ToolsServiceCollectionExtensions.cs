@@ -26,8 +26,9 @@ public static class ToolsServiceCollectionExtensions
         services.AddSingleton<IJarvisTool, SendMessageTool>();
         services.AddSingleton<IJarvisTool, BrowserControlTool>();
         services.AddSingleton<IJarvisTool, CodeHelperTool>();
+        services.AddSingleton<IJarvisTool, DevAgentTool>();
 
-        // TODO (Krok 11): kolejne narzędzia (screen_process, file_processor [wizja], dev_agent [wieloplikowy])
+        // TODO (Krok 11): kolejne narzędzia z wizją (screen_processor, file_processor) — wymagają IVisionClient.
         return services;
     }
 }
