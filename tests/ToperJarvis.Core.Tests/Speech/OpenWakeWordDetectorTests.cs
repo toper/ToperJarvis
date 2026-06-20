@@ -27,4 +27,15 @@ public class OpenWakeWordDetectorTests
 
         Assert.Null(ex);
     }
+
+    [Theory]
+    [InlineData(0.5f, 0.5f)]   // domyślna czułość → zalecany próg openWakeWord
+    [InlineData(0.8f, 0.2f)]   // wyższa czułość → niższy próg → więcej detekcji
+    [InlineData(0.2f, 0.8f)]   // niższa czułość → wyższy próg → mniej detekcji
+    [InlineData(0f, 1f)]
+    [InlineData(1f, 0f)]
+    public void ToThreshold_odwraca_czulosc(float sensitivity, float expected)
+    {
+        Assert.Equal(expected, OpenWakeWordDetector.ToThreshold(sensitivity), precision: 5);
+    }
 }

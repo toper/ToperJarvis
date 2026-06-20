@@ -13,6 +13,9 @@ namespace ToperJarvis.Speech.WakeWord;
 /// </summary>
 public sealed class OpenWakeWordDetector : IWakeWordDetector
 {
+    /// <summary>openWakeWord operuje na 16 kHz mono — inny sample-rate daje błędne mel-spektrogramy.</summary>
+    private const int RequiredSampleRate = 16000;
+
     private readonly IAudioCapture _capture;
     private readonly ILogger<OpenWakeWordDetector> _logger;
     private readonly WakeWordOptions _options;
@@ -38,13 +41,32 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
         if (_running)
             return;
 
-        _runtime = new WakeWordRuntime(new WakeWordRuntimeConfig
+        if (_capture.SampleRate != RequiredSampleRate)
         {
-            WakeWords = new[]
+            _logger.LogWarning(
+                "Niezgodny sample-rate audio: capture={Capture} Hz, openWakeWord wymaga {Required} Hz — " +
+                "wykrywanie słowa-klucza wyłączone.", _capture.SampleRate, RequiredSampleRate);
+            return;
+        }
+
+        try
+        {
+            _runtime = new WakeWordRuntime(new WakeWordRuntimeConfig
             {
-                new WakeWordConfig { Model = _options.Model, Threshold = _options.Sensitivity },
-            },
-        });
+                WakeWords = new[]
+                {
+                    new WakeWordConfig { Model = _options.Model, Threshold = ToThreshold(_options.Sensitivity) },
+                },
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Nie udało się zainicjować openWakeWord (model: {Model}) — wykrywanie słowa-klucza wyłączone.",
+                _options.Model);
+            _runtime = null;
+            return;
+        }
 
         _capture.FrameAvailable += OnFrame;
         _running = true;
@@ -57,6 +79,7 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
             return;
 
         _capture.FrameAvailable -= OnFrame;
+        _runtime?.Dispose();
         _runtime = null;
         _running = false;
     }
@@ -88,6 +111,13 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
             pcm[i] = (short)Math.Clamp(v, short.MinValue, short.MaxValue);
         }
     }
+
+    /// <summary>
+    /// Mapuje czułość 0..1 (wyższa = więcej detekcji) na próg openWakeWord, który ma odwrotną
+    /// polaryzację (wyższy próg = mniej detekcji). Przy 0.5 zwraca 0.5 (zalecany domyślny próg),
+    /// dzięki czemu kontrakt „wyższa czułość = więcej detekcji" jest spójny z silnikiem Porcupine.
+    /// </summary>
+    internal static float ToThreshold(float sensitivity) => Math.Clamp(1f - sensitivity, 0f, 1f);
 
     public void Dispose() => Stop();
 }

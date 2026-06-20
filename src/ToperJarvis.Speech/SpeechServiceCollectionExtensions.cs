@@ -19,12 +19,17 @@ public static class SpeechServiceCollectionExtensions
         services.AddSingleton<ITextToSpeech, PiperTextToSpeech>();
 
         // Wybór silnika wake-word wg konfiguracji (domyślnie openWakeWord — bez klucza).
+        // Nieznana wartość rzuca wyjątek zamiast cicho wybrać silnik — błąd configu nie jest maskowany.
         services.AddSingleton<IWakeWordDetector>(sp =>
         {
             var engine = sp.GetRequiredService<IOptions<JarvisOptions>>().Value.WakeWord.Engine;
-            return engine.Equals("porcupine", StringComparison.OrdinalIgnoreCase)
-                ? ActivatorUtilities.CreateInstance<PorcupineWakeWordDetector>(sp)
-                : ActivatorUtilities.CreateInstance<OpenWakeWordDetector>(sp);
+            return engine.Trim().ToLowerInvariant() switch
+            {
+                "porcupine" => ActivatorUtilities.CreateInstance<PorcupineWakeWordDetector>(sp),
+                "" or "openwakeword" => ActivatorUtilities.CreateInstance<OpenWakeWordDetector>(sp),
+                _ => throw new InvalidOperationException(
+                    $"Nieznany WakeWord:Engine '{engine}'. Dozwolone: 'openwakeword' (domyślny) lub 'porcupine'."),
+            };
         });
 
         return services;
