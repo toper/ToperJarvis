@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ToperJarvis.Core\ToperJarvis.Core.csproj" />
+    <ProjectReference Include="..\..\src\ToperJarvis.Llm\ToperJarvis.Llm.csproj" />
   </ItemGroup>
 
 </Project>
