@@ -38,6 +38,9 @@ public sealed class ReminderTool : IJarvisTool
         if (string.IsNullOrWhiteSpace(message))
             message = "Przypomnienie";
 
+        // /tr musi być jednowierszowe — normalizujemy ewentualne znaki nowej linii z wejścia LLM.
+        message = message.Replace('\r', ' ').Replace('\n', ' ').Trim();
+
         var taskName = "Jarvis_Reminder_" + Guid.NewGuid().ToString("N")[..8];
         try
         {
@@ -60,6 +63,8 @@ public sealed class ReminderTool : IJarvisTool
                 CultureInfo.CurrentCulture));
             psi.ArgumentList.Add("/tr");
             psi.ArgumentList.Add(BuildPopupCommand(message));
+            psi.ArgumentList.Add("/it"); // interaktywne — okno widoczne w sesji użytkownika
+            psi.ArgumentList.Add("/z");  // usuń zadanie po jednorazowym wykonaniu (brak kumulacji)
             psi.ArgumentList.Add("/f");
 
             using var process = Process.Start(psi)!;
@@ -82,7 +87,10 @@ public sealed class ReminderTool : IJarvisTool
         }
     }
 
-    /// <summary>Parsuje datę (RRRR-MM-DD) i godzinę (GG:MM) do <see cref="DateTime"/>.</summary>
+    /// <summary>
+    /// Waliduje wyłącznie FORMAT daty (RRRR-MM-DD) i godziny (GG:MM) i zwraca <see cref="DateTime"/>.
+    /// Sprawdzenie, czy termin nie jest w przeszłości, należy do <c>Create</c>.
+    /// </summary>
     internal static bool TryParseDue(string date, string time, out DateTime due)
     {
         due = default;
