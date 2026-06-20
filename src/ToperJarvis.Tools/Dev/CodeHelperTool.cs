@@ -273,13 +273,8 @@ public sealed class CodeHelperTool : IJarvisTool
         return clean;
     }
 
-    private async Task<string> AskLlmAsync(string system, string user, CancellationToken ct)
-    {
-        var response = await _chat.GetResponseAsync(
-            [new ChatMessage(ChatRole.System, system), new ChatMessage(ChatRole.User, user)],
-            cancellationToken: ct);
-        return response.Text;
-    }
+    private Task<string> AskLlmAsync(string system, string user, CancellationToken ct) =>
+        CodeWorkshop.AskLlmAsync(_chat, system, user, ct);
 
     /// <summary>Uruchamia plik właściwym interpreterem. Zwraca wyjście i czy zakończono sukcesem (exit code 0).</summary>
     private Task<(string Output, bool Ok)> RunFileAsync(string filePath, int timeoutSeconds, CancellationToken ct)

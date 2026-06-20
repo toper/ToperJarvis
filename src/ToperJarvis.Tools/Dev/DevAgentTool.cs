@@ -112,7 +112,7 @@ public sealed partial class DevAgentTool : IJarvisTool
             (lastOutput, ok) = await RunProjectAsync(runCommand, projectDir, timeout, cancellationToken);
 
             // Timeout traktujemy jak sukces — długo działająca aplikacja (serwer/GUI) zwykle działa.
-            if (ok || lastOutput.Contains("limit czasu", StringComparison.Ordinal))
+            if (ok || lastOutput.Contains(CodeWorkshop.TimeoutPrefix, StringComparison.Ordinal))
                 return $"Projekt '{projName}' działa (próba {attempt}). Zapisano: {projectDir}\n\nWynik:\n{lastOutput}";
 
             if (attempt == MaxBuildAttempts)
@@ -178,20 +178,20 @@ public sealed partial class DevAgentTool : IJarvisTool
 
     private async Task SaveFileAsync(string projectDir, string relativePath, string content, CancellationToken ct)
     {
-        var fullPath = Path.Combine(projectDir, relativePath);
+        // Plan pochodzi od LLM — pilnujemy, by ścieżka nie wyszła poza katalog projektu (np. „../..").
+        var root = Path.GetFullPath(projectDir);
+        var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
+        if (!fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Ścieżka pliku wykracza poza katalog projektu: {relativePath}");
+
         var dir = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
         await File.WriteAllTextAsync(fullPath, content, ct);
     }
 
-    private async Task<string> AskLlmAsync(string system, string user, CancellationToken ct)
-    {
-        var response = await _chat.GetResponseAsync(
-            [new ChatMessage(ChatRole.System, system), new ChatMessage(ChatRole.User, user)],
-            cancellationToken: ct);
-        return response.Text;
-    }
+    private Task<string> AskLlmAsync(string system, string user, CancellationToken ct) =>
+        CodeWorkshop.AskLlmAsync(_chat, system, user, ct);
 
     // ── Czysta logika (testowalna) ──────────────────────────────────────────────
 

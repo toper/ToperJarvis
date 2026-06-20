@@ -1,23 +1,36 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 
 namespace ToperJarvis.Tools.Dev;
 
 /// <summary>
 /// Wspólne helpery narzędzi deweloperskich (code_helper, dev_agent): czyszczenie odpowiedzi LLM
-/// z płotków markdown oraz uruchamianie procesu z limitem czasu i zabiciem drzewa procesów.
+/// z płotków markdown, wywołanie LLM oraz uruchamianie procesu z limitem czasu i zabiciem drzewa procesów.
 /// </summary>
 internal static partial class CodeWorkshop
 {
+    /// <summary>Prefiks komunikatu o przekroczeniu limitu czasu (wspólny — unika sprzężenia po stałym tekście).</summary>
+    public const string TimeoutPrefix = "Przekroczono limit czasu";
+
     /// <summary>Usuwa ogradzające bloki markdown (```lang ... ```) z odpowiedzi LLM.</summary>
-    public static string CleanCode(string text)
+    public static string CleanCode(string? text)
     {
-        text = text.Trim();
+        text = (text ?? "").Trim();
         text = FenceStart().Replace(text, "");
         text = FenceEnd().Replace(text, "");
         return text.Trim();
+    }
+
+    /// <summary>Wywołuje LLM z wiadomością systemową i użytkownika; zwraca tekst odpowiedzi.</summary>
+    public static async Task<string> AskLlmAsync(IChatClient chat, string system, string user, CancellationToken ct)
+    {
+        var response = await chat.GetResponseAsync(
+            [new ChatMessage(ChatRole.System, system), new ChatMessage(ChatRole.User, user)],
+            cancellationToken: ct);
+        return response.Text;
     }
 
     /// <summary>
@@ -63,7 +76,7 @@ internal static partial class CodeWorkshop
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 try { process.Kill(entireProcessTree: true); } catch { /* już zakończony */ }
-                return ($"Przekroczono limit czasu ({timeoutSeconds}s).", false);
+                return ($"{TimeoutPrefix} ({timeoutSeconds}s).", false);
             }
 
             var output = (await stdout).Trim();
