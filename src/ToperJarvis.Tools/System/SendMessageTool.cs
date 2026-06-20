@@ -11,31 +11,53 @@ namespace ToperJarvis.Tools.System;
 /// <summary>
 /// Narzędzie <c>send_message</c> — wysyła wiadomość przez komunikator, sterując pulpitem
 /// (symulacja klawiatury). Aplikacje desktopowe (WhatsApp, Telegram, Signal, Discord) otwiera
-/// z menu Start i wyszukuje odbiorcę; komunikatory webowe (Instagram, Messenger) otwiera w
-/// przeglądarce. Port <c>_Old/actions/send_message.py</c>.
+/// z menu Start i wyszukuje odbiorcę; Instagram i Messenger otwiera w przeglądarce.
+/// Port <c>_Old/actions/send_message.py</c>.
 /// </summary>
 public sealed class SendMessageTool : IJarvisTool
 {
-    /// <summary>Sposób dostarczenia wiadomości dla danej platformy.</summary>
+    /// <summary>Sposób dostarczenia wiadomości — każdy kanał ma własną sekwencję sterowania UI.</summary>
     internal enum Channel
     {
         DesktopApp,
-        Browser,
+        Instagram,
+        Messenger,
     }
 
     /// <summary>Rozpoznana platforma: kanał + cel (nazwa aplikacji albo adres URL).</summary>
     internal readonly record struct PlatformSpec(Channel Channel, string Target);
 
-    // Kolejność ma znaczenie — pierwsze dopasowanie wygrywa (jak w oryginale).
-    private static readonly (string[] Keywords, PlatformSpec Spec)[] PlatformMap =
-    [
-        (["whatsapp", "wapp", "wp"], new PlatformSpec(Channel.DesktopApp, "WhatsApp")),
-        (["telegram", "tg"], new PlatformSpec(Channel.DesktopApp, "Telegram")),
-        (["instagram", "insta", "ig"], new PlatformSpec(Channel.Browser, "https://www.instagram.com/direct/new/")),
-        (["signal"], new PlatformSpec(Channel.DesktopApp, "Signal")),
-        (["discord"], new PlatformSpec(Channel.DesktopApp, "Discord")),
-        (["messenger", "facebook", "fb"], new PlatformSpec(Channel.Browser, "https://www.messenger.com/")),
-    ];
+    // Opóźnienia na reakcję UI (ms). Wartości empiryczne — komunikatory ładują się/renderują różnie.
+    private const int StartMenuWaitMs = 500;
+    private const int AppNameTypedWaitMs = 600;
+    private const int AppLaunchWaitMs = 2500;
+    private const int UiSettleMs = 500;
+    private const int ClearSelectMs = 150;
+    private const int SearchResolveMs = 1000;
+    private const int ChatOpenMs = 800;
+    private const int KeySettleMs = 200;
+    private const int PageLoadMs = 4000;
+    private const int PickContactMs = 1500;
+    private const int TabStepMs = 150;
+    private const int ConversationOpenMs = 2000;
+
+    private static readonly IReadOnlyDictionary<string, PlatformSpec> Platforms =
+        new Dictionary<string, PlatformSpec>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["whatsapp"] = new(Channel.DesktopApp, "WhatsApp"),
+            ["wapp"] = new(Channel.DesktopApp, "WhatsApp"),
+            ["wp"] = new(Channel.DesktopApp, "WhatsApp"),
+            ["telegram"] = new(Channel.DesktopApp, "Telegram"),
+            ["tg"] = new(Channel.DesktopApp, "Telegram"),
+            ["signal"] = new(Channel.DesktopApp, "Signal"),
+            ["discord"] = new(Channel.DesktopApp, "Discord"),
+            ["instagram"] = new(Channel.Instagram, "https://www.instagram.com/direct/new/"),
+            ["insta"] = new(Channel.Instagram, "https://www.instagram.com/direct/new/"),
+            ["ig"] = new(Channel.Instagram, "https://www.instagram.com/direct/new/"),
+            ["messenger"] = new(Channel.Messenger, "https://www.messenger.com/"),
+            ["facebook"] = new(Channel.Messenger, "https://www.messenger.com/"),
+            ["fb"] = new(Channel.Messenger, "https://www.messenger.com/"),
+        };
 
     private readonly ILogger<SendMessageTool> _logger;
 
@@ -56,8 +78,10 @@ public sealed class SendMessageTool : IJarvisTool
         string platform = "whatsapp",
         CancellationToken cancellationToken = default)
     {
-        receiver = receiver?.Trim() ?? "";
-        messageText = messageText?.Trim() ?? "";
+        // Wpisywanie znak-po-znaku interpretuje nową linię jako „wyślij" — spłaszczamy do spacji,
+        // żeby wieloliniowa wiadomość nie poszła w kawałkach (oryginał wklejał atomowo ze schowka).
+        receiver = Flatten(receiver);
+        messageText = Flatten(messageText);
         platform = string.IsNullOrWhiteSpace(platform) ? "whatsapp" : platform.Trim();
 
         if (receiver.Length == 0)
@@ -70,9 +94,12 @@ public sealed class SendMessageTool : IJarvisTool
 
         try
         {
-            return spec.Channel == Channel.Browser
-                ? await SendViaBrowserAsync(spec.Target, receiver, messageText, platform, cancellationToken)
-                : await SendViaDesktopAppAsync(spec.Target, receiver, messageText, cancellationToken);
+            return spec.Channel switch
+            {
+                Channel.Instagram => await SendViaInstagramAsync(spec.Target, receiver, messageText, cancellationToken),
+                Channel.Messenger => await SendViaMessengerAsync(spec.Target, receiver, messageText, cancellationToken),
+                _ => await SendViaDesktopAppAsync(spec.Target, receiver, messageText, cancellationToken),
+            };
         }
         catch (OperationCanceledException)
         {
@@ -92,89 +119,105 @@ public sealed class SendMessageTool : IJarvisTool
     /// </summary>
     internal static PlatformSpec ResolvePlatform(string platform)
     {
-        var key = platform.Trim().ToLowerInvariant();
-        foreach (var (keywords, spec) in PlatformMap)
-        {
-            if (keywords.Any(k => key == k))
-                return spec;
-        }
+        var key = platform.Trim();
+        if (Platforms.TryGetValue(key, out var spec))
+            return spec;
 
         // Fallback: nieznana platforma = aplikacja desktopowa o tej nazwie (z wielkiej litery).
-        var appName = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(platform.Trim());
+        var appName = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(key.ToLowerInvariant());
         return new PlatformSpec(Channel.DesktopApp, appName);
     }
 
     private async Task<string> SendViaDesktopAppAsync(
         string appName, string receiver, string message, CancellationToken ct)
     {
-        if (!await OpenFromStartMenuAsync(appName, ct))
-            return $"Nie udało się otworzyć {appName}.";
+        await OpenFromStartMenuAsync(appName, ct);
+        await Task.Delay(SearchResolveMs, ct);
 
-        await Task.Delay(1000, ct);
+        await SearchContactAsync(receiver, ct);
+        Press("enter"); // wybór pierwszego wyniku otwiera konwersację
+        await Task.Delay(ChatOpenMs, ct);
 
-        // Wyszukaj odbiorcę (Ctrl+F → wyczyść pole → wpisz nazwę → Enter wybiera pierwszy wynik).
-        Hotkey("ctrl+f");
-        await Task.Delay(500, ct);
-        Hotkey("ctrl+a");
-        Press("delete");
-        await Task.Delay(150, ct);
-        InputSimulator.TypeText(receiver);
-        await Task.Delay(1000, ct);
-        Press("enter");
-        await Task.Delay(800, ct);
-
-        InputSimulator.TypeText(message);
-        await Task.Delay(200, ct);
-        Press("enter");
-
+        await SendTextAsync(message, ct);
         return $"Wiadomość wysłana do {receiver} przez {appName}.";
     }
 
-    private async Task<string> SendViaBrowserAsync(
-        string url, string receiver, string message, string platform, CancellationToken ct)
+    private async Task<string> SendViaInstagramAsync(
+        string url, string receiver, string message, CancellationToken ct)
     {
         if (!OpenUrl(url))
-            return $"Nie udało się otworzyć {platform} w przeglądarce.";
+            return "Nie udało się otworzyć Instagrama w przeglądarce.";
 
-        await Task.Delay(4000, ct); // czas na załadowanie strony
+        await Task.Delay(PageLoadMs, ct);
 
-        // Wyszukaj/wskaż odbiorcę i otwórz konwersację.
+        // Okno „New message": wpisz odbiorcę, zaznacz pierwszy wynik, przejdź do „Chat" i otwórz.
         InputSimulator.TypeText(receiver);
-        await Task.Delay(1500, ct);
+        await Task.Delay(PickContactMs, ct);
         Press("down");
-        await Task.Delay(300, ct);
+        await Task.Delay(KeySettleMs, ct);
         Press("enter");
-        await Task.Delay(1500, ct);
+        await Task.Delay(KeySettleMs, ct);
+        for (var i = 0; i < 4; i++)
+        {
+            Press("tab");
+            await Task.Delay(TabStepMs, ct);
+        }
+        Press("enter");
+        await Task.Delay(ConversationOpenMs, ct);
 
+        await SendTextAsync(message, ct);
+        return $"Wiadomość wysłana do {receiver} przez Instagram.";
+    }
+
+    private async Task<string> SendViaMessengerAsync(
+        string url, string receiver, string message, CancellationToken ct)
+    {
+        if (!OpenUrl(url))
+            return "Nie udało się otworzyć Messengera w przeglądarce.";
+
+        await Task.Delay(PageLoadMs, ct);
+
+        await SearchContactAsync(receiver, ct);
+        await Task.Delay(UiSettleMs, ct);
+        Press("down"); // wybór z listy podpowiedzi
+        await Task.Delay(KeySettleMs, ct);
+        Press("enter");
+        await Task.Delay(SearchResolveMs, ct);
+
+        await SendTextAsync(message, ct);
+        return $"Wiadomość wysłana do {receiver} przez Messenger.";
+    }
+
+    /// <summary>Otwiera wyszukiwarkę (Ctrl+F), czyści pole i wpisuje nazwę odbiorcy.</summary>
+    private async Task SearchContactAsync(string receiver, CancellationToken ct)
+    {
+        Hotkey("ctrl+f");
+        await Task.Delay(UiSettleMs, ct);
+        Hotkey("ctrl+a");
+        await Task.Delay(ClearSelectMs, ct);
+        Press("delete");
+        await Task.Delay(ClearSelectMs, ct);
+        InputSimulator.TypeText(receiver);
+        await Task.Delay(SearchResolveMs, ct);
+    }
+
+    /// <summary>Wpisuje treść i wysyła (Enter).</summary>
+    private static async Task SendTextAsync(string message, CancellationToken ct)
+    {
         InputSimulator.TypeText(message);
-        await Task.Delay(200, ct);
+        await Task.Delay(KeySettleMs, ct);
         Press("enter");
-
-        return $"Wiadomość wysłana do {receiver} przez {platform}.";
     }
 
     /// <summary>Otwiera aplikację z menu Start: Win → wpisz nazwę → Enter.</summary>
-    private async Task<bool> OpenFromStartMenuAsync(string appName, CancellationToken ct)
+    private async Task OpenFromStartMenuAsync(string appName, CancellationToken ct)
     {
-        try
-        {
-            Press("win");
-            await Task.Delay(500, ct);
-            InputSimulator.TypeText(appName);
-            await Task.Delay(600, ct);
-            Press("enter");
-            await Task.Delay(2500, ct); // czas na uruchomienie aplikacji
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Nie udało się otworzyć aplikacji {App} z menu Start.", appName);
-            return false;
-        }
+        Press("win");
+        await Task.Delay(StartMenuWaitMs, ct);
+        InputSimulator.TypeText(appName);
+        await Task.Delay(AppNameTypedWaitMs, ct);
+        Press("enter");
+        await Task.Delay(AppLaunchWaitMs, ct);
     }
 
     private bool OpenUrl(string url)
@@ -190,6 +233,9 @@ public sealed class SendMessageTool : IJarvisTool
             return false;
         }
     }
+
+    /// <summary>Spłaszcza znaki nowej linii do spacji (zapobiega przedwczesnemu „wyślij").</summary>
+    private static string Flatten(string? text) => (text ?? "").ReplaceLineEndings(" ").Trim();
 
     private static void Press(string key) => InputSimulator.PressKey(KeyMap.ParseKey(key)!.Value);
 

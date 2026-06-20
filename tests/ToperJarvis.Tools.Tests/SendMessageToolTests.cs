@@ -21,16 +21,27 @@ public class SendMessageToolTests
     }
 
     [Theory]
-    [InlineData("instagram", "https://www.instagram.com/direct/new/")]
-    [InlineData("ig", "https://www.instagram.com/direct/new/")]
-    [InlineData("messenger", "https://www.messenger.com/")]
-    [InlineData("fb", "https://www.messenger.com/")]
-    public void ResolvePlatform_komunikatory_webowe(string input, string url)
+    [InlineData("instagram")]
+    [InlineData("ig")]
+    [InlineData("insta")]
+    public void ResolvePlatform_instagram(string input)
     {
         var spec = SendMessageTool.ResolvePlatform(input);
 
-        Assert.Equal(SendMessageTool.Channel.Browser, spec.Channel);
-        Assert.Equal(url, spec.Target);
+        Assert.Equal(SendMessageTool.Channel.Instagram, spec.Channel);
+        Assert.Equal("https://www.instagram.com/direct/new/", spec.Target);
+    }
+
+    [Theory]
+    [InlineData("messenger")]
+    [InlineData("fb")]
+    [InlineData("facebook")]
+    public void ResolvePlatform_messenger(string input)
+    {
+        var spec = SendMessageTool.ResolvePlatform(input);
+
+        Assert.Equal(SendMessageTool.Channel.Messenger, spec.Channel);
+        Assert.Equal("https://www.messenger.com/", spec.Target);
     }
 
     [Fact]
