@@ -30,6 +30,16 @@ public class FileControllerToolTests
     [Fact]
     public void Resolve_blokuje_sciezke_bezwzgledna_poza_domem()
     {
-        Assert.Throws<UnauthorizedAccessException>(() => FileControllerTool.Resolve(@"C:\Windows"));
+        // Przenośnie: rodzic katalogu domowego leży poza domem.
+        var outside = Path.GetFullPath(Path.Combine(Home, ".."));
+        Assert.Throws<UnauthorizedAccessException>(() => FileControllerTool.Resolve(outside));
+    }
+
+    [Fact]
+    public void Resolve_blokuje_katalog_o_wspolnym_prefiksie()
+    {
+        // Katalog "home2" ma wspólny prefiks tekstowy z "home", ale leży poza nim.
+        var sibling = Path.GetFullPath(Home).TrimEnd(Path.DirectorySeparatorChar) + "2";
+        Assert.Throws<UnauthorizedAccessException>(() => FileControllerTool.Resolve(sibling));
     }
 }

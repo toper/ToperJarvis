@@ -8,12 +8,12 @@ namespace ToperJarvis.Tools.System;
 /// <summary>
 /// Narzędzie <c>file_controller</c> — operacje na plikach i folderach (lista, odczyt, zapis,
 /// tworzenie, usuwanie, przenoszenie, kopiowanie, zmiana nazwy, wyszukiwanie). Dla bezpieczeństwa
-/// operacje są ograniczone do katalogu domowego użytkownika.
+/// operacje są ograniczone do katalogu domowego użytkownika (z walidacją granicy i symlinków).
 /// </summary>
 public sealed class FileControllerTool : IJarvisTool
 {
-    private static readonly string Home =
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static readonly string HomeFull =
+        Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
     private readonly ILogger<FileControllerTool> _logger;
 
@@ -36,9 +36,14 @@ public sealed class FileControllerTool : IJarvisTool
         [Description("Nowa nazwa (dla rename) lub wzorzec (dla find).")] string? newName = null,
         [Description("Treść do zapisania (dla write/create_file).")] string? content = null)
     {
+        var op = (action ?? string.Empty).Trim().ToLowerInvariant();
         try
         {
-            return action.ToLowerInvariant() switch
+            // Tylko "list" może działać domyślnie na katalogu domowym; reszta wymaga jawnej ścieżki.
+            if (op != "list" && string.IsNullOrWhiteSpace(path))
+                return $"Operacja '{op}' wymaga podania ścieżki.";
+
+            return op switch
             {
                 "list" => List(path),
                 "read" => Read(path),
@@ -54,27 +59,52 @@ public sealed class FileControllerTool : IJarvisTool
         }
         catch (UnauthorizedAccessException)
         {
-            return "Brak uprawnień do tej ścieżki.";
+            return "Brak uprawnień lub ścieżka poza katalogiem domowym.";
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Błąd operacji {Action} na {Path}.", action, path);
-            return $"Błąd operacji {action}: {ex.Message}";
+            _logger.LogWarning(ex, "Błąd operacji {Action} na {Path}.", op, path);
+            return $"Błąd operacji {op}: {ex.Message}";
         }
     }
 
-    /// <summary>Sprowadza ścieżkę do bezwzględnej i waliduje, że leży w katalogu domowym.</summary>
+    /// <summary>
+    /// Sprowadza ścieżkę do bezwzględnej i waliduje, że leży w katalogu domowym — z poprawnym
+    /// sprawdzeniem granicy (separator) oraz rozwinięciem symlinków/junctions istniejącego celu.
+    /// </summary>
     internal static string Resolve(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
-            return Home;
+            return HomeFull;
 
-        var full = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(Home, path));
-        var homeFull = Path.GetFullPath(Home);
-        if (!full.StartsWith(homeFull, StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("Ścieżka poza katalogiem domowym.");
+        var full = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(HomeFull, path));
+        EnsureWithinHome(full);
+
+        // Ochrona przed ucieczką przez symlink/junction: jeśli cel ISTNIEJE i jest dowiązaniem,
+        // zweryfikuj jego rzeczywistą lokalizację. Dla nieistniejących ścieżek (np. przy zapisie)
+        // pomijamy — nie ma czego rozwijać.
+        FileSystemInfo? info =
+            Directory.Exists(full) ? new DirectoryInfo(full) :
+            File.Exists(full) ? new FileInfo(full) : null;
+
+        var realTarget = info?.ResolveLinkTarget(returnFinalTarget: true);
+        if (realTarget is not null)
+            EnsureWithinHome(Path.GetFullPath(realTarget.FullName));
 
         return full;
+    }
+
+    private static void EnsureWithinHome(string full)
+    {
+        if (string.Equals(full, HomeFull, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var prefix = HomeFull.EndsWith(Path.DirectorySeparatorChar)
+            ? HomeFull
+            : HomeFull + Path.DirectorySeparatorChar;
+
+        if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Ścieżka poza katalogiem domowym.");
     }
 
     private static string List(string? path)
@@ -137,6 +167,9 @@ public sealed class FileControllerTool : IJarvisTool
 
     private static string Move(string? path, string? destination)
     {
+        if (string.IsNullOrWhiteSpace(destination))
+            return "Operacja 'move' wymaga ścieżki docelowej.";
+
         var src = Resolve(path);
         var dst = Resolve(destination);
         if (Directory.Exists(src))
@@ -148,10 +181,32 @@ public sealed class FileControllerTool : IJarvisTool
 
     private static string Copy(string? path, string? destination)
     {
+        if (string.IsNullOrWhiteSpace(destination))
+            return "Operacja 'copy' wymaga ścieżki docelowej.";
+
         var src = Resolve(path);
         var dst = Resolve(destination);
+
+        if (Directory.Exists(src))
+        {
+            CopyDirectory(src, dst);
+            return $"Skopiowano folder do: {dst}";
+        }
+
+        var dstDir = Path.GetDirectoryName(dst);
+        if (!string.IsNullOrEmpty(dstDir))
+            Directory.CreateDirectory(dstDir);
         File.Copy(src, dst, overwrite: true);
         return $"Skopiowano do: {dst}";
+    }
+
+    private static void CopyDirectory(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var dir in Directory.GetDirectories(src, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(dir.Replace(src, dst));
+        foreach (var file in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
+            File.Copy(file, file.Replace(src, dst), overwrite: true);
     }
 
     private static string Rename(string? path, string? newName)
@@ -160,7 +215,7 @@ public sealed class FileControllerTool : IJarvisTool
             return "Nie podano nowej nazwy.";
 
         var src = Resolve(path);
-        var dst = Resolve(Path.Combine(Path.GetDirectoryName(src) ?? Home, newName));
+        var dst = Resolve(Path.Combine(Path.GetDirectoryName(src) ?? HomeFull, newName));
         if (Directory.Exists(src))
             Directory.Move(src, dst);
         else
@@ -171,12 +226,14 @@ public sealed class FileControllerTool : IJarvisTool
     private static string Find(string? path, string? pattern)
     {
         var dir = Resolve(path);
+        if (!Directory.Exists(dir))
+            return $"Folder nie istnieje: {dir}";
         if (string.IsNullOrWhiteSpace(pattern))
             return "Nie podano wzorca wyszukiwania.";
 
         var matches = Directory.EnumerateFileSystemEntries(dir, "*" + pattern + "*", SearchOption.AllDirectories)
             .Take(50)
-            .Select(e => e[(Home.Length + 1)..])
+            .Select(e => Path.GetRelativePath(HomeFull, e))
             .ToList();
 
         return matches.Count == 0 ? "Nie znaleziono." : string.Join("\n", matches);
