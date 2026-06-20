@@ -20,8 +20,9 @@ public static class ToolsServiceCollectionExtensions
         services.AddSingleton<IJarvisTool, YouTubeVideoTool>();
         services.AddSingleton<IJarvisTool, ComputerSettingsTool>();
         services.AddSingleton<IJarvisTool, DesktopControlTool>();
+        services.AddSingleton<IJarvisTool, ComputerControlTool>();
 
-        // TODO (Krok 9-11): kolejne narzędzia (browser_control, computer_control, screen_process, ...)
+        // TODO (Krok 9-11): kolejne narzędzia (browser_control, screen_process, file_processor, ...)
         return services;
     }
 }
