@@ -97,16 +97,33 @@ public sealed class AgentTaskQueue : IAgentService, IDisposable
         Raise(task);
     }
 
-    /// <summary>Wybiera następne zadanie: najwyższy priorytet, a przy remisie najwcześniejsze (FIFO).</summary>
-    internal static AgentTask? SelectNext(IEnumerable<AgentTask> tasks) =>
-        tasks.OrderBy(t => (int)t.Priority).ThenBy(t => t.Sequence).FirstOrDefault();
+    /// <summary>
+    /// Wybiera następne zadanie jednoprzebiegowo (O(n)): najwyższy priorytet, a przy remisie
+    /// najwcześniejsze (FIFO po <see cref="AgentTask.Sequence"/>).
+    /// </summary>
+    internal static AgentTask? SelectNext(IEnumerable<AgentTask> tasks)
+    {
+        AgentTask? best = null;
+        foreach (var t in tasks)
+        {
+            if (best is null
+                || (int)t.Priority < (int)best.Priority
+                || ((int)t.Priority == (int)best.Priority && t.Sequence < best.Sequence))
+            {
+                best = t;
+            }
+        }
+        return best;
+    }
 
     private void Raise(AgentTask task) => TaskChanged?.Invoke(this, task);
 
     public void Dispose()
     {
         _cts.Cancel();
-        try { _worker.Wait(TimeSpan.FromSeconds(2)); } catch { /* ignoruj */ }
+        // Czekamy na faktyczne zakończenie workera PRZED zwolnieniem zasobów — inaczej grozi to
+        // użyciem zdisposowanego _cts/_signal w tle.
+        try { _worker.Wait(); } catch { /* anulowanie/agregacja — ignorujemy */ }
         _cts.Dispose();
         _signal.Dispose();
     }
