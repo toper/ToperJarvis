@@ -4,7 +4,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ToperJarvis.Abstractions;
 using ToperJarvis.Abstractions.Configuration;
+using ToperJarvis.Abstractions.Memory;
 using ToperJarvis.Abstractions.Speech;
+using ToperJarvis.Abstractions.Tools;
 using ToperJarvis.Core.Prompting;
 using ToperJarvis.Llm;
 using ToperJarvis.Speech.Vad;
@@ -23,8 +25,10 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private readonly ITextToSpeech _tts;
     private readonly IChatClient _chat;
     private readonly SystemPromptProvider _prompt;
+    private readonly IMemoryStore _memory;
     private readonly ILogger<JarvisOrchestrator> _logger;
     private readonly AudioOptions _audio;
+    private readonly ChatOptions _chatOptions;
 
     private readonly List<ChatMessage> _history = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
@@ -38,6 +42,8 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         ITextToSpeech tts,
         IChatClient chat,
         SystemPromptProvider prompt,
+        IMemoryStore memory,
+        IEnumerable<IJarvisTool> tools,
         IOptions<JarvisOptions> options,
         ILogger<JarvisOrchestrator> logger)
     {
@@ -47,8 +53,13 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         _tts = tts;
         _chat = chat;
         _prompt = prompt;
+        _memory = memory;
         _logger = logger;
         _audio = options.Value.Audio;
+        _chatOptions = new ChatOptions
+        {
+            Tools = tools.Select(t => (AITool)t.AsAIFunction()).ToList(),
+        };
     }
 
     public AssistantState State { get; private set; } = AssistantState.Idle;
@@ -159,7 +170,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
             try
             {
-                await foreach (var update in _chat.GetStreamingResponseAsync(_history, options: null, ct))
+                await foreach (var update in _chat.GetStreamingResponseAsync(_history, _chatOptions, ct))
                 {
                     var delta = update.Text;
                     if (string.IsNullOrEmpty(delta))
@@ -236,8 +247,15 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
     private void EnsureSystemPrompt()
     {
-        if (_history.Count == 0)
-            _history.Add(new ChatMessage(ChatRole.System, _prompt.Build(DateTimeOffset.Now)));
+        if (_history.Count != 0)
+            return;
+
+        var prompt = _prompt.Build(DateTimeOffset.Now);
+        var facts = _memory.FormatForPrompt();
+        if (facts.Length > 0)
+            prompt += "\n\n" + facts;
+
+        _history.Add(new ChatMessage(ChatRole.System, prompt));
     }
 
     private void AddTranscript(TranscriptRole role, string text) =>
