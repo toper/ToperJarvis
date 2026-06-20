@@ -1,8 +1,8 @@
 # ToperJarvis
 
-Lokalny asystent głosowy dla Windows (.NET 8 + Avalonia) — następca prototypu w Pythonie
-(`_Old/`). Aplikacja siedzi w trayu, działa w trybie okienkowym lub pełnoekranowym i nasłuchuje
-komend głosowych po wykryciu słowa-klucza **„Jarvis"**.
+Lokalny asystent głosowy dla Windows (.NET 10 + Avalonia). Aplikacja siedzi w trayu, działa
+w trybie okienkowym lub pełnoekranowym i nasłuchuje komend głosowych po wykryciu słowa-klucza
+**„Jarvis"**.
 
 ## Pętla działania
 
@@ -14,7 +14,7 @@ komend głosowych po wykryciu słowa-klucza **„Jarvis"**.
 
 | Obszar | Technologia |
 |---|---|
-| UI | Avalonia 11 (MVVM), SkiaSharp HUD, wbudowany TrayIcon |
+| UI | Avalonia 12 (MVVM), SkiaSharp HUD, wbudowany TrayIcon |
 | Wake-word | Picovoice Porcupine („Jarvis") |
 | STT | Whisper.net (offline) |
 | TTS | Piper (głos polski — Geralt) |
@@ -35,12 +35,11 @@ src/
   ToperJarvis.Platform.Windows — implementacje zależne od Windows
 tests/                         — testy jednostkowe
 assets/                        — modele, ikony, prompt (poza repo)
-_Old/                          — referencyjny prototyp w Pythonie
 ```
 
 ## Wymagania środowiska
 
-- .NET SDK 8+
+- .NET SDK 10+
 - Endpoint vLLM (Qwen3) pod `http://192.168.7.30:8000/v1`
 - Model Whisper w `assets/whisper/`
 - `piper.exe` + głos w `assets/piper/`
@@ -48,4 +47,4 @@ _Old/                          — referencyjny prototyp w Pythonie
 
 ## Status
 
-🚧 W trakcie przepisywania z Pythona na .NET. Zobacz plan w historii projektu.
+🚧 Projekt w aktywnym rozwoju.

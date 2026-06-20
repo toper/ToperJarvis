@@ -54,14 +54,8 @@ secrets.json
 **/memory/*.json
 !**/memory/.gitkeep
 
-# Referencyjny prototyp w Pythonie — NIE wersjonujemy w repo
+# Lokalne katalogi robocze (poza repo)
 _Old/
-
-# Python (środowisko _Old)
-__pycache__/
-*.pyc
-.venv/
-venv/
 
 # System
 Thumbs.db

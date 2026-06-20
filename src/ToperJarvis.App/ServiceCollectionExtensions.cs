@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using ToperJarvis.App.ViewModels;
+using ToperJarvis.Core;
+using ToperJarvis.Speech;
 
 namespace ToperJarvis.App;
 
@@ -14,9 +16,12 @@ public static class ServiceCollectionExtensions
         // ViewModele
         services.AddSingleton<MainWindowViewModel>();
 
-        // TODO (Krok 2-6): services.AddJarvisSpeech();  (audio, wake-word, STT, TTS)
-        // TODO (Krok 5):   services.AddJarvisLlm();      (klient vLLM/OpenAI)
-        // TODO (Krok 7):   services.AddJarvisCore();     (orchestrator, pamięć)
+        // Warstwa mowy: audio, wake-word, STT, TTS
+        services.AddJarvisSpeech();
+
+        // Rdzeń: LLM (vLLM/OpenAI), prompt, orchestrator pętli głosowej
+        services.AddJarvisCore();
+
         // TODO (Krok 9+):  services.AddJarvisTools();    (narzędzia)
         // TODO:            services.AddJarvisWindows();  (implementacje platformowe)
 
