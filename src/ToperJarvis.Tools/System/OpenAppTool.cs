@@ -76,7 +76,7 @@ public sealed class OpenAppTool : IJarvisTool
         }
     }
 
-    private static string Resolve(string name)
+    internal static string Resolve(string name)
     {
         if (LooksLikeUrl(name))
             return name.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? name : "https://" + name;
@@ -90,8 +90,26 @@ public sealed class OpenAppTool : IJarvisTool
         return name; // fallback — powłoka spróbuje sama
     }
 
-    private static bool LooksLikeUrl(string name) =>
-        name.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-        name.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-        name.Contains('.') && !name.Contains(' ');
+    private static readonly HashSet<string> NonUrlExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".bat", ".cmd", ".msi", ".lnk", ".ps1", ".sh", ".scr",
+    };
+
+    private static bool LooksLikeUrl(string name)
+    {
+        if (name.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (name.Contains(' ') || !name.Contains('.'))
+            return false;
+
+        var ext = Path.GetExtension(name);
+        if (NonUrlExtensions.Contains(ext))
+            return false;
+
+        // Domena: część po ostatniej kropce wygląda jak TLD (same litery, min. 2 znaki).
+        var tld = ext.TrimStart('.');
+        return tld.Length >= 2 && tld.All(char.IsLetter);
+    }
 }

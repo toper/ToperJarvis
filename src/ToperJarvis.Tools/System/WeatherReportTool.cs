@@ -27,7 +27,14 @@ public sealed class WeatherReportTool : IJarvisTool
 
         var query = WebUtility.UrlEncode($"pogoda {city} {time}".Trim());
         var url = $"https://www.google.com/search?q={query}";
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        return $"Pokazuję pogodę dla: {city}.";
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            return $"Pokazuję pogodę dla: {city}.";
+        }
+        catch (Exception)
+        {
+            return $"Nie udało się otworzyć prognozy pogody dla: {city}.";
+        }
     }
 }
