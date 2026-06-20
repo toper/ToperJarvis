@@ -8,7 +8,8 @@ public class OpenWakeWordDetectorTests
     public void ToPcm16_skaluje_i_przycina()
     {
         var input = new[] { 0f, 1f, -1f, 0.5f, 2f, -2f };
-        var pcm = OpenWakeWordDetector.ToPcm16(input);
+        var pcm = new short[input.Length];
+        OpenWakeWordDetector.ToPcm16(input, pcm);
 
         Assert.Equal(0, pcm[0]);
         Assert.Equal(32767, pcm[1]);   // 1.0 → max
@@ -21,6 +22,9 @@ public class OpenWakeWordDetectorTests
     [Fact]
     public void ToPcm16_pusta_tablica()
     {
-        Assert.Empty(OpenWakeWordDetector.ToPcm16(Array.Empty<float>()));
+        var ex = Record.Exception(() =>
+            OpenWakeWordDetector.ToPcm16(Array.Empty<float>(), Array.Empty<short>()));
+
+        Assert.Null(ex);
     }
 }

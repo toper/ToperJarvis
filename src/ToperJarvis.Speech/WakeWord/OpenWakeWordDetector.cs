@@ -18,6 +18,7 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
     private readonly WakeWordOptions _options;
 
     private WakeWordRuntime? _runtime;
+    private short[] _pcm = Array.Empty<short>();
     private bool _running;
 
     public OpenWakeWordDetector(
@@ -66,24 +67,26 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
         if (runtime is null)
             return;
 
-        var pcm = ToPcm16(frame.Samples);
-        if (runtime.Process(pcm) >= 0)
+        var samples = frame.Samples;
+        if (_pcm.Length != samples.Length)
+            _pcm = new short[samples.Length];
+
+        ToPcm16(samples, _pcm);
+        if (runtime.Process(_pcm) >= 0)
         {
             _logger.LogInformation("Wykryto słowo-klucz (openWakeWord).");
             Detected?.Invoke(this, EventArgs.Empty);
         }
     }
 
-    /// <summary>Konwertuje próbki float (-1..1) na 16-bit PCM z przycięciem zakresu.</summary>
-    internal static short[] ToPcm16(ReadOnlySpan<float> samples)
+    /// <summary>Konwertuje próbki float (-1..1) na 16-bit PCM z przycięciem zakresu, zapisując do <paramref name="pcm"/>.</summary>
+    internal static void ToPcm16(ReadOnlySpan<float> samples, Span<short> pcm)
     {
-        var pcm = new short[samples.Length];
         for (var i = 0; i < samples.Length; i++)
         {
             var v = (int)(samples[i] * 32767f);
             pcm[i] = (short)Math.Clamp(v, short.MinValue, short.MaxValue);
         }
-        return pcm;
     }
 
     public void Dispose() => Stop();
