@@ -15,7 +15,7 @@ w trybie okienkowym lub pełnoekranowym i nasłuchuje komend głosowych po wykry
 | Obszar | Technologia |
 |---|---|
 | UI | Avalonia 12 (MVVM), SkiaSharp HUD, wbudowany TrayIcon |
-| Wake-word | Picovoice Porcupine („Jarvis") |
+| Wake-word | openWakeWord („hey jarvis", open-source, bez klucza) — opcjonalnie Picovoice Porcupine |
 | STT | Whisper.net (offline) |
 | TTS | Piper (głos polski — Geralt) |
 | LLM | vLLM / Qwen3 (API zgodne z OpenAI) `http://192.168.7.30:8000` |
@@ -43,7 +43,8 @@ assets/                        — modele, ikony, prompt (poza repo)
 - Endpoint vLLM (Qwen3) pod `http://192.168.7.30:8000/v1`
 - Model Whisper w `assets/whisper/`
 - `piper.exe` + głos w `assets/piper/`
-- AccessKey Picovoice (Porcupine) w `appsettings.Local.json`
+- Wake-word („hey jarvis") działa od razu — modele openWakeWord są wbudowane, **bez klucza**.
+  AccessKey Picovoice jest potrzebny tylko, gdy ustawisz `WakeWord:Engine = porcupine`.
 
 ## Status
 

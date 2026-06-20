@@ -67,16 +67,26 @@ public sealed class TtsOptions
     public double Speed { get; set; } = 1.0;
 }
 
-/// <summary>Wykrywanie słowa-klucza (Picovoice Porcupine).</summary>
+/// <summary>Wykrywanie słowa-klucza.</summary>
 public sealed class WakeWordOptions
 {
-    /// <summary>AccessKey z konsoli Picovoice (trzymany w appsettings.Local.json).</summary>
+    /// <summary>
+    /// Silnik wykrywania: "openwakeword" (domyślny, open-source, bez klucza) lub "porcupine".
+    /// </summary>
+    public string Engine { get; set; } = "openwakeword";
+
+    /// <summary>
+    /// Nazwa modelu openWakeWord (wbudowany w pakiet), np. "hey_jarvis_v0.1".
+    /// </summary>
+    public string Model { get; set; } = "hey_jarvis_v0.1";
+
+    /// <summary>AccessKey Picovoice — wymagany tylko dla silnika "porcupine".</summary>
     public string AccessKey { get; set; } = "";
 
-    /// <summary>Wbudowane słowo-klucz Porcupine (built-in keyword "jarvis").</summary>
+    /// <summary>Wbudowane słowo-klucz Porcupine (dla silnika "porcupine").</summary>
     public string Keyword { get; set; } = "jarvis";
 
-    /// <summary>Czułość detekcji 0..1 (wyższa = więcej detekcji, więcej fałszywych).</summary>
+    /// <summary>Czułość/próg detekcji 0..1 (wyższa = więcej detekcji, więcej fałszywych).</summary>
     public float Sensitivity { get; set; } = 0.5f;
 }
 
