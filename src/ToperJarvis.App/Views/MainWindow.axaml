@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:ToperJarvis.App.ViewModels"
+        xmlns:ctrl="using:ToperJarvis.App.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="700"
@@ -16,10 +17,14 @@
 
     <Grid RowDefinitions="Auto,*,Auto" Margin="24">
 
-        <!-- Nagłówek: stan asystenta -->
+        <!-- Nagłówek: stan asystenta + HUD -->
         <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
             <TextBlock Text="JARVIS" FontSize="28" FontWeight="Bold" Foreground="#4FC3F7"/>
             <TextBlock Text="{Binding StateText}" FontSize="16" Foreground="#B0BEC5"/>
+            <ctrl:HudControl Height="160" Margin="0,8,0,0"
+                             State="{Binding State}"
+                             Cpu="{Binding Metrics.CpuPercent}"
+                             Ram="{Binding Metrics.RamPercent}"/>
         </StackPanel>
 
         <!-- Transkrypt konwersacji -->
