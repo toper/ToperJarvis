@@ -16,8 +16,9 @@ public static class ToolsServiceCollectionExtensions
         services.AddSingleton<IJarvisTool, WeatherReportTool>();
         services.AddSingleton<IJarvisTool, WebSearchTool>();
         services.AddSingleton<IJarvisTool, FileControllerTool>();
+        services.AddSingleton<IJarvisTool, ReminderTool>();
 
-        // TODO (Krok 9-11): kolejne narzędzia (reminder, browser_control, computer_control, ...)
+        // TODO (Krok 9-11): kolejne narzędzia (computer_settings, browser_control, computer_control, ...)
         return services;
     }
 }
