@@ -46,6 +46,14 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private Bitmap? _cameraFrame;
 
+    /// <summary>Obciążenie GPU serwera DGX (%) — duży gauge.</summary>
+    [ObservableProperty]
+    private double _gpuUtil;
+
+    /// <summary>Pobór mocy GPU serwera DGX (W) — duży gauge.</summary>
+    [ObservableProperty]
+    private double _powerW;
+
     private readonly HomeAssistantClient? _ha;
     private readonly DgxClient? _dgx;
     private readonly WebcamService? _webcam;
@@ -142,8 +150,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (_dgx is not null)
         {
-            list.Add(new HudReadout("GPU AI", _dgx.GpuUtil is { } u ? $"{u:0}%" : "—", true));
-            list.Add(new HudReadout("MOC AI", _dgx.PowerW is { } w ? $"{w:0} W" : "—", true));
+            GpuUtil = _dgx.GpuUtil ?? 0;
+            PowerW = _dgx.PowerW ?? 0;
         }
 
         Telemetry = list;

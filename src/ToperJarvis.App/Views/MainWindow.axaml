@@ -63,11 +63,13 @@
             <ctrl:HudControl State="{Binding State}"
                              Cpu="{Binding Metrics.CpuPercent}"
                              Ram="{Binding Metrics.RamPercent}"
+                             GpuUtil="{Binding GpuUtil}"
+                             PowerW="{Binding PowerW}"
                              MicLevel="{Binding MicLevel}"
                              LastTurnMs="{Binding LastTurnMs}"
                              Telemetry="{Binding Telemetry}"/>
             <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0"
-                    Width="220" Height="165" CornerRadius="3"
+                    Width="240" Height="135" CornerRadius="3"
                     BorderBrush="#4FC3F7" BorderThickness="1" ClipToBounds="True"
                     Background="#0E1626"
                     IsVisible="{Binding CameraFrame, Converter={x:Static ObjectConverters.IsNotNull}}">

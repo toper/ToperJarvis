@@ -30,6 +30,12 @@ public sealed class HudControl : Control
     public static readonly StyledProperty<double> RamProperty =
         AvaloniaProperty.Register<HudControl, double>(nameof(Ram));
 
+    public static readonly StyledProperty<double> GpuUtilProperty =
+        AvaloniaProperty.Register<HudControl, double>(nameof(GpuUtil));
+
+    public static readonly StyledProperty<double> PowerWProperty =
+        AvaloniaProperty.Register<HudControl, double>(nameof(PowerW));
+
     public static readonly StyledProperty<double> MicLevelProperty =
         AvaloniaProperty.Register<HudControl, double>(nameof(MicLevel));
 
@@ -55,6 +61,12 @@ public sealed class HudControl : Control
     public AssistantState State { get => GetValue(StateProperty); set => SetValue(StateProperty, value); }
     public double Cpu { get => GetValue(CpuProperty); set => SetValue(CpuProperty, value); }
     public double Ram { get => GetValue(RamProperty); set => SetValue(RamProperty, value); }
+
+    /// <summary>Obciążenie GPU serwera DGX (%) — duży gauge.</summary>
+    public double GpuUtil { get => GetValue(GpuUtilProperty); set => SetValue(GpuUtilProperty, value); }
+
+    /// <summary>Pobór mocy GPU serwera DGX (W) — duży gauge.</summary>
+    public double PowerW { get => GetValue(PowerWProperty); set => SetValue(PowerWProperty, value); }
 
     /// <summary>Poziom sygnału mikrofonu (0..1) — napędza waveform i jasność orba.</summary>
     public double MicLevel { get => GetValue(MicLevelProperty); set => SetValue(MicLevelProperty, value); }
@@ -84,14 +96,15 @@ public sealed class HudControl : Control
     public override void Render(DrawingContext context)
     {
         context.Custom(new HudDrawOperation(
-            new Rect(Bounds.Size), _seconds, State, Cpu, Ram, MicLevel, LastTurnMs, DateTime.Now,
+            new Rect(Bounds.Size), _seconds, State, Cpu, Ram, GpuUtil, PowerW, MicLevel, LastTurnMs, DateTime.Now,
             Telemetry ?? System.Array.Empty<HudReadout>()));
     }
 
     /// <summary>Operacja rysująca HUD bezpośrednio na płótnie SkiaSharp.</summary>
     private sealed class HudDrawOperation(
-        Rect bounds, double seconds, AssistantState state, double cpu, double ram, double micLevel,
-        double lastTurnMs, DateTime now, System.Collections.Generic.IReadOnlyList<HudReadout> telemetry)
+        Rect bounds, double seconds, AssistantState state, double cpu, double ram, double gpuUtil, double powerW,
+        double micLevel, double lastTurnMs, DateTime now,
+        System.Collections.Generic.IReadOnlyList<HudReadout> telemetry)
         : ICustomDrawOperation
     {
         // Paleta cyan → fiolet (stany aktywne) zgodna ze stylem J.A.R.V.I.S.
@@ -146,15 +159,18 @@ public sealed class HudControl : Control
                 DrawCore(canvas, cx, cy, maxR * 0.46f, color, idlePulse, level);
                 DrawCenterText(canvas, cx, cy, maxR, color, level, state);
 
-                // Futurystyczne wskaźniki systemu po bokach orba + linie danych płynące do orba.
+                // Duże wskaźniki: GPU AI i MOC AI z serwera DGX (ważniejsze) + linie danych do orba.
+                const double maxPowerW = 140.0; // ~TDP GB10 — skala łuku mocy
                 var gr = Math.Min(w, h) * 0.12f;
-                var cpuPos = new SKPoint(gr * 1.4f, h - gr * 1.35f);
-                var ramPos = new SKPoint(w - gr * 1.4f, h - gr * 1.35f);
+                var leftPos = new SKPoint(gr * 1.4f, h - gr * 1.35f);
+                var rightPos = new SKPoint(w - gr * 1.4f, h - gr * 1.35f);
                 var edge = maxR * 1.02f;
-                DrawFlowLine(canvas, cpuPos, new SKPoint(cx, cy), edge, GaugeColor(cpu));
-                DrawFlowLine(canvas, ramPos, new SKPoint(cx, cy), edge, GaugeColor(ram));
-                DrawGauge(canvas, cpuPos.X, cpuPos.Y, gr, cpu, "CPU");
-                DrawGauge(canvas, ramPos.X, ramPos.Y, gr, ram, "RAM");
+                var gpuFrac = gpuUtil / 100.0;
+                var powFrac = powerW / maxPowerW;
+                DrawFlowLine(canvas, leftPos, new SKPoint(cx, cy), edge, GaugeColor(gpuFrac * 100));
+                DrawFlowLine(canvas, rightPos, new SKPoint(cx, cy), edge, GaugeColor(powFrac * 100));
+                DrawGauge(canvas, leftPos.X, leftPos.Y, gr, gpuFrac, $"{gpuUtil:0}%", "GPU AI");
+                DrawGauge(canvas, rightPos.X, rightPos.Y, gr, powFrac, $"{powerW:0} W", "MOC AI");
 
                 // Zegar (lewy górny) + telemetria wokół orba.
                 DrawClock(canvas, 8, 8);
@@ -208,12 +224,17 @@ public sealed class HudControl : Control
             const float spacing = 44f;
             var topY = h * 0.30f;
 
-            // Lewa kolumna zaczyna się od czasu przetwarzania.
+            // Lewa kolumna: czas przetwarzania + CPU; prawa: RAM. Reszta z listy (HA).
             var leftY = topY;
             DrawReadout(canvas, 8, leftY, "PRZETWARZANIE", lastTurnMs > 0 ? $"{lastTurnMs:0} ms" : "—", color);
             leftY += spacing;
+            DrawReadout(canvas, 8, leftY, "CPU", $"{cpu:0}%", color);
+            leftY += spacing;
 
             var rightY = topY;
+            DrawReadoutRight(canvas, w - 8, rightY, "RAM", $"{ram:0}%", color);
+            rightY += spacing;
+
             foreach (var r in telemetry)
             {
                 if (r.Right)
@@ -448,13 +469,13 @@ public sealed class HudControl : Control
             }
         }
 
-        // Łukowy wskaźnik (gauge) wartości 0–100% z etykietą; barwa zależy od obciążenia.
-        private static void DrawGauge(SKCanvas canvas, float cx, float cy, float r, double value, string label)
+        // Łukowy wskaźnik (gauge): wypełnienie frac (0..1), własny tekst i etykieta; barwa wg obciążenia.
+        private static void DrawGauge(SKCanvas canvas, float cx, float cy, float r, double fraction, string text, string label)
         {
             const float start = 130f;
             const float sweep = 280f;
-            var frac = (float)Math.Clamp(value / 100.0, 0, 1);
-            var col = GaugeColor(value);
+            var frac = (float)Math.Clamp(fraction, 0, 1);
+            var col = GaugeColor(fraction * 100);
             var rect = new SKRect(cx - r, cy - r, cx + r, cy + r);
             var stroke = r * 0.16f;
 
@@ -472,9 +493,9 @@ public sealed class HudControl : Control
                 canvas.DrawPath(fgPath, fg);
             }
 
-            using (var vFont = new SKFont(Futuristic, r * 0.52f))
+            using (var vFont = new SKFont(Futuristic, r * 0.42f))
             using (var vPaint = new SKPaint { Color = SKColors.White.WithAlpha(225), IsAntialias = true })
-                canvas.DrawText($"{value:0}%", cx, cy + r * 0.18f, SKTextAlign.Center, vFont, vPaint);
+                canvas.DrawText(text, cx, cy + r * 0.16f, SKTextAlign.Center, vFont, vPaint);
 
             using (var lFont = new SKFont(Futuristic, r * 0.28f))
             using (var lPaint = new SKPaint { Color = col.WithAlpha(210), IsAntialias = true })

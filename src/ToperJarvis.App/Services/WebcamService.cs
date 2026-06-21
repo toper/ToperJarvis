@@ -63,7 +63,9 @@ public sealed class WebcamService : IDisposable
                 if (cap.Read(frame) && !frame.Empty())
                 {
                     using var thumb = new Mat();
-                    Cv2.Resize(frame, thumb, new Size(320, 240));
+                    // Zachowaj proporcje kamery (np. 16:9) — skaluj do szerokości 320.
+                    var height = frame.Width > 0 ? (int)Math.Round(320.0 * frame.Height / frame.Width) : 180;
+                    Cv2.Resize(frame, thumb, new Size(320, Math.Max(1, height)));
                     Cv2.ImEncode(".jpg", thumb, out var buf, new[] { (int)ImwriteFlags.JpegQuality, 70 });
                     _latest = buf;
                 }
