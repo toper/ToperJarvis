@@ -20,6 +20,29 @@ public sealed class JarvisOptions
     public HomeAssistantOptions HomeAssistant { get; set; } = new();
     public CameraOptions Camera { get; set; } = new();
     public DgxOptions Dgx { get; set; } = new();
+    public McpOptions Mcp { get; set; } = new();
+}
+
+/// <summary>
+/// Lokalny serwer MCP wystawiający narzędzia działające na tym PC zdalnemu agentowi Hermes (Hektor),
+/// gdy to on jest mózgiem. Hektor łączy się po HTTP/SSE i wywołuje lokalne akcje (open_app itp.).
+/// </summary>
+public sealed class McpOptions
+{
+    /// <summary>Czy uruchomić lokalny serwer MCP.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Adres nasłuchu. 0.0.0.0 = dostępny w LAN (by Hermes z innego hosta mógł się dobić).</summary>
+    public string Host { get; set; } = "0.0.0.0";
+
+    /// <summary>Port serwera MCP.</summary>
+    public int Port { get; set; } = 8765;
+
+    /// <summary>
+    /// Token autoryzacji (nagłówek <c>Authorization: Bearer &lt;token&gt;</c>). Sekret — trzymaj w
+    /// appsettings.Local.json. Pusty = brak ochrony (niezalecane, serwer steruje PC).
+    /// </summary>
+    public string Token { get; set; } = "";
 }
 
 /// <summary>Monitoring serwera DGX (GPU util/moc/temperatura) przez SSH + nvidia-smi.</summary>
@@ -49,6 +72,22 @@ public sealed class CameraOptions
 
     /// <summary>Liczba klatek na sekundę mini-podglądu (oszczędnie — to tylko miniatura).</summary>
     public int Fps { get; set; } = 8;
+
+    /// <summary>
+    /// Wymuszona szerokość przechwytywania (px). 0 = auto (sterownik decyduje). Ustaw natywny tryb
+    /// kamery (np. 1280 lub 640), gdy sterownik domyślnie interpoluje do anamorficznego FullHD.
+    /// </summary>
+    public int CaptureWidth { get; set; }
+
+    /// <summary>Wymuszona wysokość przechwytywania (px). 0 = auto. Patrz <see cref="CaptureWidth"/>.</summary>
+    public int CaptureHeight { get; set; }
+
+    /// <summary>
+    /// URL migawki kamery IP (np. http://user:pass@host/cgi-bin/snapshot.cgi). Gdy ustawiony, podgląd
+    /// pobiera klatki po HTTP zamiast z lokalnego urządzenia (<see cref="DeviceIndex"/>). Zawiera dane
+    /// logowania — trzymaj w appsettings.Local.json (poza repo). Obsługa Basic i Digest.
+    /// </summary>
+    public string SnapshotUrl { get; set; } = "";
 }
 
 /// <summary>Integracja z Home Assistant (telemetria w HUD: temperatury, kamera).</summary>
@@ -145,6 +184,22 @@ public sealed class LlmOptions
     /// <c>/no_think</c> do promptu, co znacząco skraca czas odpowiedzi (brak fazy rozumowania).
     /// </summary>
     public bool EnableThinking { get; set; }
+
+    /// <summary>
+    /// Wskazówki formatowania wysyłane jako system message do modelu/agenta (Hektora). Mają sprawić,
+    /// by odpowiedź dobrze brzmiała czytana na głos przez TTS. Pusty = nie wysyłaj. Nie definiuje
+    /// persony (tą zarządza Hektor) — tylko formę odpowiedzi.
+    /// </summary>
+    public string SystemPrompt { get; set; } =
+        "Rozmawiasz z użytkownikiem przez asystenta głosowego (Jarvis) na JEGO komputerze z Windows. " +
+        "Twoje narzędzia z grupy „jarvis-azog” (m.in. open_app, send_message, computer_control, " +
+        "desktop_control, file_controller, browser_control) wykonują się NA KOMPUTERZE UŻYTKOWNIKA, nie " +
+        "w Twoim środowisku. Gdy użytkownik prosi o otwarcie programu lub pliku „u mnie / na moim " +
+        "komputerze” (np. Word, Excel, przeglądarka), UŻYJ tych narzędzi — nie oceniaj dostępności po " +
+        "swoim systemie i nie odmawiaj. " +
+        "Twoja odpowiedź jest czytana na głos przez syntezator mowy: pełne, krótkie zdania naturalnym " +
+        "językiem mówionym, bez formatowania Markdown (gwiazdek, nagłówków, tabel), bloków kodu, list " +
+        "punktowanych, emoji ani surowych adresów URL. Rozwijaj skróty i symbole w słowa. Odpowiadaj zwięźle.";
 }
 
 /// <summary>Model wizji (multimodalny). Domyślnie ten sam endpoint co LLM.</summary>
@@ -189,6 +244,13 @@ public sealed class TtsOptions
 
     /// <summary>Tempo mowy (1.0 = normalne).</summary>
     public double Speed { get; set; } = 1.0;
+
+    /// <summary>
+    /// Leksykon wymowy — podmiany tekstu PRZED syntezą (Piper źle czyta skróty/symbole). Klucz =
+    /// token/symbol, wartość = wymowa. Dopełnia (i może nadpisać) zestaw domyślny w SpeechNormalizer,
+    /// np. {"USD":"dolarów","kWh":"kilowatogodzin"}.
+    /// </summary>
+    public Dictionary<string, string> Lexicon { get; set; } = new();
 }
 
 /// <summary>Wykrywanie słowa-klucza.</summary>

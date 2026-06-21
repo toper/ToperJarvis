@@ -30,9 +30,11 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private readonly AudioOptions _audio;
     private readonly LlmOptions _llm;
     private readonly ChatOptions _chatOptions;
+    private readonly IReadOnlyDictionary<string, string> _lexicon;
 
     private readonly List<ChatMessage> _history = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
+    private CancellationTokenSource? _turnCts;
     private VadBuffer? _vad;
     private bool _started;
 
@@ -62,10 +64,10 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         _logger = logger;
         _audio = options.Value.Audio;
         _llm = options.Value.Llm;
-        _chatOptions = new ChatOptions
-        {
-            Tools = tools.Select(t => (AITool)t.AsAIFunction()).ToList(),
-        };
+        _lexicon = options.Value.Tts.Lexicon;
+        // Mózgiem jest zdalny agent Hermes (Hektor) — to ON wywołuje narzędzia (lokalne przez MCP,
+        // resztę własne). ToperJarvis nie wysyła już własnej listy narzędzi do modelu.
+        _chatOptions = new ChatOptions();
     }
 
     public AssistantState State { get; private set; } = AssistantState.Idle;
@@ -208,6 +210,9 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     {
         await _turnGate.WaitAsync(ct);
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        // Token tury: powiązany z zewnętrznym ct + wewnętrzny, by Interrupt() (Esc) mógł przerwać.
+        _turnCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var token = _turnCts.Token;
         try
         {
             AddTranscript(TranscriptRole.User, userText);
@@ -216,14 +221,15 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
             SetState(AssistantState.Thinking);
 
+            // Streaming: Hektor strumieniuje samą odpowiedź (tool-progress i narracja „Let me check…"
+            // są wyłączone po stronie API-servera Hermesa), więc TTS rusza już ze zdaniem 1.
             var accumulator = new SentenceAccumulator();
-            var (ttsChannel, ttsWorker) = StartTtsWorker(ct);
+            var (ttsChannel, ttsWorker) = StartTtsWorker(token);
             var assistant = new System.Text.StringBuilder();
             var spoke = false;
-
             try
             {
-                await foreach (var update in _chat.GetStreamingResponseAsync(_history, _chatOptions, ct))
+                await foreach (var update in _chat.GetStreamingResponseAsync(_history, _chatOptions, token))
                 {
                     var delta = update.Text;
                     if (string.IsNullOrEmpty(delta))
@@ -232,20 +238,36 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                     assistant.Append(delta);
                     foreach (var sentence in accumulator.Add(delta))
                     {
+                        // Normalizuj pod TTS: usuń Markdown, zastosuj leksykon wymowy. Puste pomiń.
+                        var speech = SpeechNormalizer.Normalize(sentence, _lexicon);
+                        if (string.IsNullOrWhiteSpace(speech))
+                            continue;
                         if (!spoke)
                         {
                             spoke = true;
                             SetState(AssistantState.Speaking);
                         }
-                        await ttsChannel.Writer.WriteAsync(sentence, ct);
+                        await ttsChannel.Writer.WriteAsync(speech, token);
                     }
                 }
 
                 if (accumulator.Flush() is { } tail)
                 {
-                    if (!spoke)
-                        SetState(AssistantState.Speaking);
-                    await ttsChannel.Writer.WriteAsync(tail, ct);
+                    var speech = SpeechNormalizer.Normalize(tail, _lexicon);
+                    if (!string.IsNullOrWhiteSpace(speech))
+                    {
+                        if (!spoke)
+                            SetState(AssistantState.Speaking);
+                        await ttsChannel.Writer.WriteAsync(speech, token);
+                    }
+                }
+
+                // Pokaż pełną odpowiedź (surowy Markdown — UI renderuje) po wygenerowaniu.
+                var full = assistant.ToString().Trim();
+                if (full.Length > 0)
+                {
+                    _history.Add(new ChatMessage(ChatRole.Assistant, full));
+                    AddTranscript(TranscriptRole.Assistant, full);
                 }
             }
             finally
@@ -262,21 +284,28 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                     // anulowanie odtwarzania — ignorujemy
                 }
             }
-
-            var full = assistant.ToString().Trim();
-            if (full.Length > 0)
-            {
-                _history.Add(new ChatMessage(ChatRole.Assistant, full));
-                AddTranscript(TranscriptRole.Assistant, full);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Przerwane przez użytkownika (Esc) lub zewnętrzny ct — to normalne zakończenie tury.
+            _logger.LogInformation("Tura przerwana.");
         }
         finally
         {
             stopwatch.Stop();
+            _turnCts.Dispose();
+            _turnCts = null;
             TurnCompleted?.Invoke(this, stopwatch.Elapsed.TotalMilliseconds);
             _turnGate.Release();
             SetState(AssistantState.Idle);
         }
+    }
+
+    /// <summary>Przerywa bieżącą turę — anuluje wywołanie LLM i odtwarzanie TTS (Esc w UI).</summary>
+    public void Interrupt()
+    {
+        try { _turnCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* tura już zakończona */ }
     }
 
     /// <summary>
@@ -302,19 +331,14 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
     private void EnsureSystemPrompt()
     {
+        // Personę i pamięć dostarcza Hektor (Hermes) po swojej stronie. Wysyłamy tylko lekki system
+        // message z wytycznymi formy pod TTS (Hermes je honoruje) — raz, na początku historii.
         if (_history.Count != 0)
             return;
 
-        var prompt = _prompt.Build(DateTimeOffset.Now);
-        var facts = _memory.FormatForPrompt();
-        if (facts.Length > 0)
-            prompt += "\n\n" + facts;
-
-        // Wyłączenie „myślenia" Qwen3 dla szybszych odpowiedzi (soft-switch w prompcie).
-        if (!_llm.EnableThinking)
-            prompt += "\n\n/no_think";
-
-        _history.Add(new ChatMessage(ChatRole.System, prompt));
+        var prompt = _llm.SystemPrompt;
+        if (!string.IsNullOrWhiteSpace(prompt))
+            _history.Add(new ChatMessage(ChatRole.System, prompt));
     }
 
     private void AddTranscript(TranscriptRole role, string text) =>

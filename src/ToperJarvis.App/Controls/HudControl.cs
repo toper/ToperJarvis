@@ -142,7 +142,8 @@ public sealed class HudControl : Control
                 var canvas = lease.SkCanvas;
                 var w = (float)bounds.Width;
                 var h = (float)bounds.Height;
-                canvas.Clear(new SKColor(0x0B, 0x0F, 0x1A));
+                // NIE czyścimy płótna — Avalonia skomponowała już pod spodem bazę i pływającą mapę,
+                // a Clear(...) wymazałby je (tryb Src). HUD rysujemy na wierzchu istniejącej zawartości.
 
                 var cx = w / 2f;
                 var cy = h / 2f;
@@ -178,8 +179,16 @@ public sealed class HudControl : Control
                 var edge = maxR * 1.02f;
                 var gpuFrac = gpuUtil / 100.0;
                 var powFrac = powerW / maxPowerW;
-                DrawFlowLine(canvas, leftPos, new SKPoint(cx, cy), edge, GaugeColor(gpuFrac * 100));
-                DrawFlowLine(canvas, rightPos, new SKPoint(cx, cy), edge, GaugeColor(powFrac * 100));
+                var orb = new SKPoint(cx, cy);
+
+                // Linie zaczynają się na KRAWĘDZI elementu (nie w jego środku) i kończą na krawędzi orba.
+                DrawFlowLine(canvas, EdgeToward(leftPos, orb, gr * 1.08f), orb, edge, GaugeColor(gpuFrac * 100));  // GPU
+                DrawFlowLine(canvas, EdgeToward(rightPos, orb, gr * 1.08f), orb, edge, GaugeColor(powFrac * 100)); // MOC
+                DrawFlowLine(canvas, new SKPoint(222, 38), orb, edge, Cyan);                 // zegar (poza ramką)
+                DrawFlowLine(canvas, new SKPoint(w - 246, 73), orb, edge, Cyan);             // kamera (lewy bok prostokąta)
+                DrawFlowLine(canvas, new SKPoint(186, h * 0.30f + 78), orb, edge, Cyan);     // metryki lewe
+                DrawFlowLine(canvas, new SKPoint(w - 186, h * 0.30f + 56), orb, edge, Cyan); // metryki prawe
+
                 DrawGauge(canvas, leftPos.X, leftPos.Y, gr, gpuFrac, $"{gpuUtil:0}%", "GPU AI");
                 DrawGauge(canvas, rightPos.X, rightPos.Y, gr, powFrac, $"{powerW:0} W", "MOC AI");
 
@@ -218,60 +227,110 @@ public sealed class HudControl : Control
             }
         }
 
-        private void DrawClock(SKCanvas canvas, float x, float y)
+        // Punkt na linii od „from" w stronę „target", oddalony o „dist" — start linii na krawędzi elementu.
+        private static SKPoint EdgeToward(SKPoint from, SKPoint target, float dist)
         {
-            using var timePaint = new SKPaint { Color = BrightCyan.WithAlpha(230), IsAntialias = true };
-            canvas.DrawText(now.ToString("HH:mm:ss"), x, y + 26, SKTextAlign.Left, ClockTimeFont, timePaint);
-
-            using var datePaint = new SKPaint { Color = Cyan.WithAlpha(170), IsAntialias = true };
-            canvas.DrawText(now.ToString("dddd, dd.MM.yyyy"), x + 2, y + 46, SKTextAlign.Left, ClockDateFont, datePaint);
+            var dx = target.X - from.X;
+            var dy = target.Y - from.Y;
+            var d = (float)Math.Sqrt(dx * dx + dy * dy);
+            return d < 1f ? from : new SKPoint(from.X + dx / d * dist, from.Y + dy / d * dist);
         }
 
-        // Panele telemetrii wokół orba: PRZETWARZANIE (realne) + odczyty z listy (HA, DGX).
+        // Zegar w futurystycznej obwódce (jak okienka metryk).
+        private void DrawClock(SKCanvas canvas, float x, float y)
+        {
+            const float w = 206f, h = 60f;
+            DrawPanelFrame(canvas, x, y, w, h, Cyan, right: false);
+
+            using var timePaint = new SKPaint { Color = BrightCyan.WithAlpha(230), IsAntialias = true };
+            canvas.DrawText(now.ToString("HH:mm:ss"), x + 12, y + 34, SKTextAlign.Left, ClockTimeFont, timePaint);
+
+            using var datePaint = new SKPaint { Color = Cyan.WithAlpha(170), IsAntialias = true };
+            canvas.DrawText(now.ToString("dddd, dd.MM.yyyy"), x + 14, y + 52, SKTextAlign.Left, ClockDateFont, datePaint);
+        }
+
+        // Panele telemetrii wokół orba: PRZETWARZANIE (realne) + odczyty z listy (HA, DGX) —
+        // każdy w futurystycznej obwódce (styl „okienka HUD" z Cyberpunka), w naszej palecie cyan.
         private void DrawTelemetry(SKCanvas canvas, float w, float h, SKColor color)
         {
             const float spacing = 44f;
+            const float cardW = 172f;
+            const float cardH = 38f;
             var topY = h * 0.30f;
+            var leftX = 8f;
+            var rightX = w - 8 - cardW;
 
-            // Lewa kolumna: czas przetwarzania + CPU; prawa: RAM. Reszta z listy (HA).
             var leftY = topY;
-            DrawReadout(canvas, 8, leftY, "PRZETWARZANIE", lastTurnMs > 0 ? $"{lastTurnMs:0} ms" : "—", color);
+            DrawReadoutCard(canvas, leftX, leftY, cardW, cardH, "PRZETWARZANIE", lastTurnMs > 0 ? $"{lastTurnMs:0} ms" : "—", color, false);
             leftY += spacing;
-            DrawReadout(canvas, 8, leftY, "CPU", $"{cpu:0}%", color);
+            DrawReadoutCard(canvas, leftX, leftY, cardW, cardH, "CPU", $"{cpu:0}%", color, false);
             leftY += spacing;
 
             var rightY = topY;
-            DrawReadout(canvas, w - 8, rightY, "RAM", $"{ram:0}%", color, right: true);
+            DrawReadoutCard(canvas, rightX, rightY, cardW, cardH, "RAM", $"{ram:0}%", color, true);
             rightY += spacing;
 
             foreach (var r in telemetry)
             {
                 if (r.Right)
                 {
-                    DrawReadout(canvas, w - 8, rightY, r.Label, r.Value, color, right: true);
+                    DrawReadoutCard(canvas, rightX, rightY, cardW, cardH, r.Label, r.Value, color, true);
                     rightY += spacing;
                 }
                 else
                 {
-                    DrawReadout(canvas, 8, leftY, r.Label, r.Value, color);
+                    DrawReadoutCard(canvas, leftX, leftY, cardW, cardH, r.Label, r.Value, color, false);
                     leftY += spacing;
                 }
             }
         }
 
-        // Jeden odczyt telemetrii; right = wyrównanie do prawej (pasek i tekst po drugiej stronie).
-        private void DrawReadout(SKCanvas canvas, float x, float y, string label, string value, SKColor color, bool right = false)
+        // Futurystyczna obwódka „okienka HUD": prostokąt ze ściętym górnym rogiem od strony orba,
+        // półprzezroczyste tło, cyjanowe obramowanie. right = ścięcie po lewej (dla prawej kolumny).
+        private static void DrawPanelFrame(SKCanvas canvas, float left, float top, float w, float h, SKColor color, bool right)
         {
-            var a = (byte)(80 + 60 * (0.5 + 0.5 * Math.Sin(seconds * 2 + x + y))); // subtelne pulsowanie
-            var align = right ? SKTextAlign.Right : SKTextAlign.Left;
-            var textX = right ? x - 10 : x + 10;
+            const float cut = 9f;
+            using var path = new SKPath();
+            if (!right)
+            {
+                path.MoveTo(left, top);
+                path.LineTo(left + w - cut, top);
+                path.LineTo(left + w, top + cut);
+                path.LineTo(left + w, top + h);
+                path.LineTo(left, top + h);
+            }
+            else
+            {
+                path.MoveTo(left + cut, top);
+                path.LineTo(left + w, top);
+                path.LineTo(left + w, top + h);
+                path.LineTo(left, top + h);
+                path.LineTo(left, top + cut);
+            }
+            path.Close();
 
-            using (var bar = new SKPaint { Color = color.WithAlpha(a), IsAntialias = true })
-                canvas.DrawRect(right ? x - 3 : x, y, 3, 30, bar);
-            using (var lPaint = new SKPaint { Color = color.WithAlpha(150), IsAntialias = true })
-                canvas.DrawText(label, textX, y + 12, align, ReadoutLabelFont, lPaint);
-            using (var vPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true })
-                canvas.DrawText(value, textX, y + 30, align, ReadoutValueFont, vPaint);
+            using (var fill = new SKPaint { Color = new SKColor(0x0E, 0x16, 0x26).WithAlpha(140), IsAntialias = true })
+                canvas.DrawPath(path, fill);
+            using (var border = new SKPaint { Color = color.WithAlpha(90), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.1f })
+                canvas.DrawPath(path, border);
+        }
+
+        // Jedno „okienko" telemetrii: obwódka + pulsujący akcent na krawędzi wewnętrznej + etykieta i wartość.
+        private void DrawReadoutCard(SKCanvas canvas, float left, float top, float w, float h, string label, string value, SKColor color, bool right)
+        {
+            DrawPanelFrame(canvas, left, top, w, h, color, right);
+
+            // Pulsujący akcent na krawędzi wewnętrznej (bliżej orba).
+            var a = (byte)(110 + 80 * (0.5 + 0.5 * Math.Sin(seconds * 2 + left + top)));
+            using (var accent = new SKPaint { Color = color.WithAlpha(a), IsAntialias = true })
+                canvas.DrawRect(right ? left + w - 2.5f : left, top + 4, 2.5f, h - 8, accent);
+
+            var align = right ? SKTextAlign.Right : SKTextAlign.Left;
+            var textX = right ? left + w - 12 : left + 12;
+            using (var lPaint = new SKPaint { Color = color.WithAlpha(160), IsAntialias = true })
+                canvas.DrawText(label, textX, top + 15, align, ReadoutLabelFont, lPaint);
+            using (var vPaint = new SKPaint { Color = SKColors.White.WithAlpha(225), IsAntialias = true })
+                canvas.DrawText(value, textX, top + 33, align, ReadoutValueFont, vPaint);
         }
 
         private void DrawRipples(SKCanvas canvas, float cx, float cy, float maxR, SKColor color, float intensity)
@@ -387,7 +446,9 @@ public sealed class HudControl : Control
             // Marka u góry rdzenia.
             using var brandFont = new SKFont(Futuristic, maxR * 0.13f);
             using var brandPaint = new SKPaint { Color = SKColors.White.WithAlpha(140), IsAntialias = true };
-            canvas.DrawText("J.A.R.V.I.S", cx, cy - maxR * 0.02f, SKTextAlign.Center, brandFont, brandPaint);
+            // Baza tak dobrana, by środek pionowy tekstu wypadł dokładnie na cy (środek rdzenia).
+            var brandBaseline = cy - (brandFont.Metrics.Ascent + brandFont.Metrics.Descent) / 2f;
+            canvas.DrawText("J.A.R.V.I.S", cx, brandBaseline, SKTextAlign.Center, brandFont, brandPaint);
 
             // Bieżący stan poniżej — barwą stanu, futurystyczną czcionką, z poświatą.
             using var stateFont = new SKFont(Futuristic, maxR * 0.10f);
@@ -402,10 +463,48 @@ public sealed class HudControl : Control
                 Color = Lerp(color, BrightCyan, 0.3).WithAlpha((byte)(200 + level * 55)),
                 IsAntialias = true,
             };
+            // Wygięty po dolnym łuku (‿) między przedostatnim a ostatnim pierścieniem, wyśrodkowany na dole.
             var label = StateLabel(state);
-            var y = cy + maxR * 0.17f;
-            canvas.DrawText(label, cx, y, SKTextAlign.Center, stateFont, glow);
-            canvas.DrawText(label, cx, y, SKTextAlign.Center, stateFont, statePaint);
+            var arcR = maxR * 0.90f;
+            DrawTextOnArc(canvas, cx, cy, arcR, label, stateFont, glow);
+            DrawTextOnArc(canvas, cx, cy, arcR, label, stateFont, statePaint);
+        }
+
+        // Rysuje tekst wzdłuż dolnego łuku okręgu (kształt ‿, litery „stoją" pochylone ku środkowi),
+        // czytelny lewo→prawo i wyśrodkowany na dole (6 o'clock). Układ glif po glifie daje pewną
+        // orientację bez zależności od zwrotu SKPath.AddArc.
+        private static void DrawTextOnArc(SKCanvas canvas, float cx, float cy, float radius, string text, SKFont font, SKPaint paint)
+        {
+            const double bottom = Math.PI / 2; // 90° = dół okręgu w układzie ekranowym (y w dół)
+            var widths = new float[text.Length];
+            var total = 0f;
+            for (var i = 0; i < text.Length; i++)
+            {
+                widths[i] = font.MeasureText(text[i].ToString());
+                total += widths[i];
+            }
+
+            // Baza liter leży na łuku, a wersaliki „rosną" ku środkowi — przesuń bazę o pół wysokości
+            // wersalika na zewnątrz, by pasmo tekstu leżało dokładnie na promieniu (środek między pierścieniami).
+            var baseline = font.Metrics.CapHeight / 2f;
+
+            // Lewa krawędź napisu = większy kąt (bliżej 180°); czytamy w stronę malejących kątów.
+            var angle = bottom + (total / 2) / radius;
+            for (var i = 0; i < text.Length; i++)
+            {
+                var charAngle = widths[i] / radius;
+                var mid = angle - charAngle / 2;
+                var x = cx + radius * (float)Math.Cos(mid);
+                var y = cy + radius * (float)Math.Sin(mid);
+
+                canvas.Save();
+                canvas.Translate(x, y);
+                canvas.RotateDegrees((float)(mid * 180 / Math.PI) - 90f);
+                canvas.DrawText(text[i].ToString(), 0, baseline, SKTextAlign.Center, font, paint);
+                canvas.Restore();
+
+                angle -= charAngle;
+            }
         }
 
         private static string StateLabel(AssistantState state) => state switch

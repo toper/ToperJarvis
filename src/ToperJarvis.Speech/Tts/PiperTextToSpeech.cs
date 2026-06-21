@@ -88,7 +88,10 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
         }
         catch (OperationCanceledException)
         {
-            // przerwanie mowy (np. nowa komenda) — ignorujemy
+            // Przerwanie mowy (Esc/nowa komenda). Jeśli anulowano po wysłaniu tekstu, a przed odczytem
+            // ścieżki WAV, proces Pipera ma niedoczytaną linię na stdout → rozjazd parowania
+            // żądanie↔odpowiedź. Reset gwarantuje czysty proces dla następnego zdania.
+            ResetProcess();
         }
         catch (Exception ex)
         {

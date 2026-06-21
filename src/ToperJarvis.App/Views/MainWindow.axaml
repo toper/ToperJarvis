@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:ToperJarvis.App.ViewModels"
         xmlns:ctrl="using:ToperJarvis.App.Controls"
+        xmlns:md="clr-namespace:Markdown.Avalonia;assembly=Markdown.Avalonia"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="700"
@@ -54,7 +55,29 @@
         <Style Selector="Button.hud:pressed /template/ Border#bg">
             <Setter Property="Background" Value="#2A6A85"/>
         </Style>
+
+        <!-- Tło „oddychające": symetryczny, płynny zoom przez animację marginesu (równe ze wszystkich
+             stron → wyśrodkowane powiększanie/pomniejszanie, bez przesuwania). RenderTransform nie ma
+             domyślnego animatora w Avalonii, stąd Margin (obraz nadmiarowy zawsze pokrywa okno). -->
+        <Style Selector="Image.bgfloat">
+            <Setter Property="Margin" Value="-40,-40,-40,-40"/>
+            <Style.Animations>
+                <Animation Duration="0:0:7" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
+                    <KeyFrame Cue="0%">
+                        <Setter Property="Margin" Value="-40,-40,-40,-40"/>
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                        <Setter Property="Margin" Value="-90,-90,-90,-90"/>
+                    </KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
     </Window.Styles>
+
+    <Panel Background="#0B0F1A">
+    <!-- Pływające tło całego okna (≈20% widoczności) — za całą zawartością, na nieprzezroczystej bazie. -->
+    <Image Classes="bgfloat" Source="avares://ToperJarvis.App/Assets/Background6.jpg" Opacity="0.2"
+           Stretch="UniformToFill" IsHitTestVisible="False"/>
 
     <Grid RowDefinitions="*,Auto,Auto" Margin="24">
 
@@ -94,11 +117,11 @@
                         <GradientStop Offset="1.0" Color="#FF000000"/>
                     </LinearGradientBrush>
                 </ScrollViewer.OpacityMask>
-                <ItemsControl ItemsSource="{Binding Transcript}" VerticalAlignment="Bottom" Margin="0,16">
+                <ItemsControl ItemsSource="{Binding Transcript}" VerticalAlignment="Bottom" Margin="0,16"
+                              Foreground="#ECEFF1">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding}" TextWrapping="Wrap"
-                                       Foreground="#ECEFF1" Margin="0,6"/>
+                            <md:MarkdownScrollViewer Markdown="{Binding}" Margin="0,6"/>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -128,4 +151,5 @@
                     Command="{Binding SendCommand}"/>
         </Grid>
     </Grid>
+    </Panel>
 </Window>

@@ -43,4 +43,7 @@ public interface IAssistantOrchestrator
 
     /// <summary>Push-to-talk: koniec nasłuchu (puszczono klawisz) — przetwarza nagranie.</summary>
     void EndPushToTalk();
+
+    /// <summary>Przerywa bieżącą turę (myślenie/akcje/mowę) — anuluje wywołanie LLM i odtwarzanie TTS.</summary>
+    void Interrupt();
 }

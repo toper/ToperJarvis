@@ -25,7 +25,7 @@ public partial class MainWindow : Window
     private void OnTranscriptChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
         Dispatcher.UIThread.Post(() => TranscriptScroll.ScrollToEnd(), DispatcherPriority.Background);
 
-    /// <summary>F11 — przełącza pełny ekran/okno; Esc — wychodzi z pełnego ekranu.</summary>
+    /// <summary>F11 — przełącza pełny ekran/okno; Esc — przerywa bieżącą turę (myślenie/akcje/mowę).</summary>
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.F11)
@@ -35,9 +35,9 @@ public partial class MainWindow : Window
                 : WindowState.FullScreen;
             e.Handled = true;
         }
-        else if (e.Key == Key.Escape && WindowState == WindowState.FullScreen)
+        else if (e.Key == Key.Escape)
         {
-            WindowState = WindowState.Normal;
+            (DataContext as MainWindowViewModel)?.Interrupt();
             e.Handled = true;
         }
     }

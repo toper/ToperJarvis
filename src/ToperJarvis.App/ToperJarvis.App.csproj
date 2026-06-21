@@ -24,9 +24,16 @@
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
     <PackageReference Include="OpenCvSharp4.Windows" Version="4.10.0.20241108" />
+    <PackageReference Include="Markdown.Avalonia.Tight" Version="12.0.0-a3" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.9" />
+  </ItemGroup>
+
+  <!-- Serwer MCP wystawiający lokalne narzędzia agentowi Hermes (Hektor) — wymaga ASP.NET Core. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>

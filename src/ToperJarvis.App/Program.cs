@@ -1,11 +1,14 @@
 using System;
 using System.IO;
 using Avalonia;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ToperJarvis.Abstractions.Configuration;
+using ToperJarvis.App.Mcp;
 
 namespace ToperJarvis.App;
 
@@ -41,13 +44,22 @@ sealed class Program
         }
     }
 
-    private static IHost BuildHost(string[] args) =>
-        Host.CreateDefaultBuilder(args)
+    private static IHost BuildHost(string[] args)
+    {
+        // Wczytaj konfigurację raz wcześniej — potrzebujemy flagi MCP, by warunkowo dołożyć host HTTP.
+        var config = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile("appsettings.Local.json", optional: true)
+            .Build();
+        var mcp = config.GetSection($"{JarvisOptions.SectionName}:Mcp").Get<McpOptions>() ?? new McpOptions();
+
+        var builder = Host.CreateDefaultBuilder(args)
             .UseContentRoot(AppContext.BaseDirectory)
-            .ConfigureAppConfiguration((_, config) =>
+            .ConfigureAppConfiguration((_, cfg) =>
             {
-                config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
-                config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+                cfg.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+                cfg.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
             })
             .ConfigureLogging(logging =>
             {
@@ -61,8 +73,27 @@ sealed class Program
                     .Bind(context.Configuration.GetSection(JarvisOptions.SectionName));
 
                 services.AddJarvisApp();
-            })
-            .Build();
+
+                // Serwer MCP wystawiający lokalne narzędzia agentowi Hermes (Hektor).
+                if (mcp.Enabled)
+                    services.AddJarvisMcp();
+            });
+
+        // Host HTTP (Kestrel) dla MCP — tylko gdy włączony, by nie wystawiać portu bez potrzeby.
+        if (mcp.Enabled)
+            builder.ConfigureWebHostDefaults(web =>
+            {
+                web.UseUrls($"http://{mcp.Host}:{mcp.Port}");
+                web.Configure(app =>
+                {
+                    app.UseJarvisMcpAuth(mcp.Token);
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints => endpoints.MapMcp());
+                });
+            });
+
+        return builder.Build();
+    }
 
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()

@@ -188,6 +188,9 @@ public partial class MainWindowViewModel : ViewModelBase
         await _orchestrator.SubmitTextAsync(text);
     }
 
+    /// <summary>Przerywa bieżącą turę (Esc) — anuluje myślenie/akcje/mowę.</summary>
+    public void Interrupt() => _orchestrator.Interrupt();
+
     private static string Describe(AssistantState state) => state switch
     {
         AssistantState.Idle => "Bezczynny — powiedz „Jarvis”",
@@ -217,5 +220,6 @@ public partial class MainWindowViewModel : ViewModelBase
         public Task SubmitTextAsync(string text, CancellationToken ct = default) => Task.CompletedTask;
         public void BeginPushToTalk() { }
         public void EndPushToTalk() { }
+        public void Interrupt() { }
     }
 }
