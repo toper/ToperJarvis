@@ -19,22 +19,30 @@
 
         <!-- Nagłówek: stan asystenta + HUD -->
         <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
-            <TextBlock Text="JARVIS" FontSize="28" FontWeight="Bold" Foreground="#4FC3F7"/>
-            <TextBlock Text="{Binding StateText}" FontSize="16" Foreground="#B0BEC5"/>
-            <ctrl:HudControl Height="160" Margin="0,8,0,0"
+            <ctrl:HudControl Height="340" Margin="0,4,0,0"
                              State="{Binding State}"
                              Cpu="{Binding Metrics.CpuPercent}"
-                             Ram="{Binding Metrics.RamPercent}"/>
+                             Ram="{Binding Metrics.RamPercent}"
+                             MicLevel="{Binding MicLevel}"/>
         </StackPanel>
 
-        <!-- Transkrypt konwersacji -->
-        <Border Grid.Row="1" Background="#111827" CornerRadius="8" Padding="12">
-            <ScrollViewer>
-                <ItemsControl ItemsSource="{Binding Transcript}">
+        <!-- Transkrypt: ~25% wysokości okna, zakotwiczony do dołu, długi gradient zaniku u góry -->
+        <Border Grid.Row="1" Background="#111827" CornerRadius="8" Padding="12,0"
+                ClipToBounds="True" VerticalAlignment="Bottom"
+                Height="{Binding $parent[Window].Bounds.Height, Converter={StaticResource Ratio}, ConverterParameter=0.25}">
+            <ScrollViewer x:Name="TranscriptScroll" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer.OpacityMask>
+                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                        <GradientStop Offset="0.0" Color="#00000000"/>
+                        <GradientStop Offset="0.45" Color="#FF000000"/>
+                        <GradientStop Offset="1.0" Color="#FF000000"/>
+                    </LinearGradientBrush>
+                </ScrollViewer.OpacityMask>
+                <ItemsControl ItemsSource="{Binding Transcript}" VerticalAlignment="Bottom" Margin="0,16">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding}" TextWrapping="Wrap"
-                                       Foreground="#ECEFF1" Margin="0,4"/>
+                                       Foreground="#ECEFF1" Margin="0,6"/>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -44,9 +52,25 @@
         <!-- Wejście tekstowe -->
         <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,16,0,0">
             <TextBox Grid.Column="0" Text="{Binding InputText}"
-                     Watermark="Wpisz komendę…" FontSize="14"
-                     KeyDown="OnInputKeyDown"/>
+                     PlaceholderText="Wpisz komendę…" FontSize="14"
+                     Foreground="#ECEFF1" Background="#1B2435"
+                     CaretBrush="#4FC3F7"
+                     KeyDown="OnInputKeyDown">
+                <TextBox.Resources>
+                    <!-- Wymuszenie czytelnych kolorów we wszystkich stanach (Fluent nadpisuje je przy fokusie). -->
+                    <SolidColorBrush x:Key="TextControlBackground" Color="#1B2435"/>
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#1B2435"/>
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#0E1626"/>
+                    <SolidColorBrush x:Key="TextControlForeground" Color="#ECEFF1"/>
+                    <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#ECEFF1"/>
+                    <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FFFFFF"/>
+                </TextBox.Resources>
+            </TextBox>
             <Button Grid.Column="1" Content="Wyślij" Margin="8,0,0,0"
+                    Padding="20,0" FontWeight="SemiBold"
+                    Background="#4FC3F7" Foreground="#0B0F1A"
+                    HorizontalContentAlignment="Center"
+                    VerticalAlignment="Stretch"
                     Command="{Binding SendCommand}"/>
         </Grid>
     </Grid>

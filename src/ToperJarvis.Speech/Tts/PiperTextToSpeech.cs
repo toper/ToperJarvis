@@ -10,21 +10,29 @@ using ToperJarvis.Abstractions.Speech;
 namespace ToperJarvis.Speech.Tts;
 
 /// <summary>
-/// Synteza mowy offline przez Piper (proces <c>piper.exe</c>). Tekst trafia na stdin, a surowy
-/// 16-bit PCM (mono) wraca na stdout i jest odtwarzany przez NAudio. Sample rate odczytywany
-/// z pliku konfiguracji głosu (<c>&lt;model&gt;.onnx.json</c>).
+/// Synteza mowy offline przez Piper. Utrzymuje JEDEN trwały proces <c>piper.exe --json-input</c>,
+/// dzięki czemu model głosu (~63 MB) ładuje się raz, a kolejne zdania syntezują się w kilkadziesiąt
+/// ms (zamiast ~400 ms narzutu na proces przy każdym zdaniu). Piper zapisuje WAV per zdanie i
+/// wypisuje jego ścieżkę na stdout — to sygnał końca syntezy. Odtwarzanie przez NAudio.
 /// </summary>
-public sealed class PiperTextToSpeech : ITextToSpeech
+public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
 {
     private readonly TtsOptions _options;
+    private readonly IAudioOutput _output;
     private readonly ILogger<PiperTextToSpeech> _logger;
-    private readonly int _sampleRate;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly string _tempDir;
 
-    public PiperTextToSpeech(IOptions<JarvisOptions> options, ILogger<PiperTextToSpeech> logger)
+    private Process? _piper;
+    private int _counter;
+
+    public PiperTextToSpeech(IOptions<JarvisOptions> options, IAudioOutput output, ILogger<PiperTextToSpeech> logger)
     {
         _options = options.Value.Tts;
+        _output = output;
         _logger = logger;
-        _sampleRate = ReadSampleRate(_options.VoiceModelPath);
+        _tempDir = Path.Combine(Path.GetTempPath(), "ToperJarvis", "tts");
+        Directory.CreateDirectory(_tempDir);
     }
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)
@@ -32,11 +40,60 @@ public sealed class PiperTextToSpeech : ITextToSpeech
         if (string.IsNullOrWhiteSpace(text))
             return;
 
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var piper = EnsureProcess();
+            if (piper is null)
+                return;
+
+            var outPath = Path.Combine(_tempDir, $"seg_{Interlocked.Increment(ref _counter)}.wav");
+            var line = JsonSerializer.Serialize(new { text, output_file = outPath });
+
+            await piper.StandardInput.WriteLineAsync(line.AsMemory(), ct);
+            await piper.StandardInput.FlushAsync(ct);
+
+            // Piper wypisuje ścieżkę gotowego pliku na stdout — czekamy na ten sygnał.
+            var done = await piper.StandardOutput.ReadLineAsync(ct);
+            if (done is null)
+            {
+                _logger.LogWarning("Piper zakończył proces nieoczekiwanie — restart przy kolejnym zdaniu.");
+                ResetProcess();
+                return;
+            }
+
+            if (File.Exists(outPath))
+            {
+                await PlayAsync(outPath, ct);
+                TryDelete(outPath);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // przerwanie mowy (np. nowa komenda) — ignorujemy
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Błąd syntezy Piper — restart procesu.");
+            ResetProcess();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>Uruchamia (raz) trwały proces piper.exe w trybie json-input. Null = brak plików.</summary>
+    private Process? EnsureProcess()
+    {
+        if (_piper is { HasExited: false })
+            return _piper;
+
         if (!File.Exists(_options.PiperPath) || !File.Exists(_options.VoiceModelPath))
         {
             _logger.LogWarning("Brak piper.exe ({Piper}) lub modelu głosu ({Voice}) — TTS wyłączone.",
                 _options.PiperPath, _options.VoiceModelPath);
-            return;
+            return null;
         }
 
         var lengthScale = _options.Speed > 0 ? 1.0 / _options.Speed : 1.0;
@@ -48,42 +105,41 @@ public sealed class PiperTextToSpeech : ITextToSpeech
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            // Katalog roboczy = katalog Pipera (espeak-ng-data leży obok exe).
+            WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(_options.PiperPath)) ?? Environment.CurrentDirectory,
         };
         psi.ArgumentList.Add("--model");
         psi.ArgumentList.Add(_options.VoiceModelPath);
-        psi.ArgumentList.Add("--output-raw");
-        psi.ArgumentList.Add("--length-scale");
+        psi.ArgumentList.Add("--json-input");
+        psi.ArgumentList.Add("--length_scale");
         psi.ArgumentList.Add(lengthScale.ToString(CultureInfo.InvariantCulture));
 
-        using var process = new Process { StartInfo = psi };
+        var process = new Process { StartInfo = psi };
         process.Start();
 
-        // Drenaż stderr równolegle — inaczej zapełniony bufor stderr mógłby zablokować proces.
-        var errorTask = process.StandardError.ReadToEndAsync(ct);
-
-        await process.StandardInput.WriteLineAsync(text);
-        process.StandardInput.Close();
-
-        using var pcm = new MemoryStream();
-        await process.StandardOutput.BaseStream.CopyToAsync(pcm, ct);
-        await process.WaitForExitAsync(ct);
-
-        if (pcm.Length == 0)
+        // Drenaż stderr w tle (logi per zdanie) — inaczej pełny bufor zablokowałby proces.
+        _ = Task.Run(async () =>
         {
-            var err = await errorTask;
-            _logger.LogWarning("Piper nie zwrócił audio. stderr: {Err}", err);
-            return;
-        }
+            try { await process.StandardError.ReadToEndAsync(); }
+            catch { /* proces zakończony */ }
+        });
 
-        pcm.Position = 0;
-        await PlayAsync(pcm, ct);
+        _piper = process;
+        _logger.LogInformation("Piper uruchomiony (trwały proces, model: {Voice}).", _options.VoiceModelPath);
+        return _piper;
     }
 
-    private async Task PlayAsync(Stream pcm, CancellationToken ct)
+    private void ResetProcess()
     {
-        var format = new WaveFormat(_sampleRate, 16, 1);
-        using var reader = new RawSourceWaveStream(pcm, format);
-        using var output = new WaveOutEvent();
+        try { _piper?.Kill(true); } catch { /* ignoruj */ }
+        _piper?.Dispose();
+        _piper = null;
+    }
+
+    private async Task PlayAsync(string wavPath, CancellationToken ct)
+    {
+        using var reader = new WaveFileReader(wavPath);
+        using var output = new WaveOutEvent { DeviceNumber = _output.DeviceNumber };
         var tcs = new TaskCompletionSource();
 
         output.PlaybackStopped += (_, _) => tcs.TrySetResult();
@@ -92,7 +148,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech
 
         using (ct.Register(() =>
         {
-            output.Stop();
+            try { output.Stop(); } catch { /* ignoruj */ }
             tcs.TrySetCanceled();
         }))
         {
@@ -100,25 +156,14 @@ public sealed class PiperTextToSpeech : ITextToSpeech
         }
     }
 
-    private int ReadSampleRate(string voiceModelPath)
+    private static void TryDelete(string path)
     {
-        const int defaultRate = 22050;
-        try
-        {
-            var configPath = voiceModelPath + ".json";
-            if (!File.Exists(configPath))
-                return defaultRate;
+        try { File.Delete(path); } catch { /* plik zniknie z TEMP */ }
+    }
 
-            using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
-            if (doc.RootElement.TryGetProperty("audio", out var audio) &&
-                audio.TryGetProperty("sample_rate", out var sr))
-                return sr.GetInt32();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Nie udało się odczytać sample_rate głosu — używam {Rate}.", defaultRate);
-        }
-
-        return defaultRate;
+    public void Dispose()
+    {
+        ResetProcess();
+        _gate.Dispose();
     }
 }

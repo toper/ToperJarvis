@@ -1,8 +1,10 @@
 using System;
+using System.IO;
 using Avalonia;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using ToperJarvis.Abstractions.Configuration;
 
 namespace ToperJarvis.App;
@@ -20,6 +22,10 @@ sealed class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Ujednolicenie katalogu roboczego z lokalizacją exe — NanoWakeWord ładuje modele ONNX
+        // ze ścieżki względnej „models/", a względne ścieżki assetów też liczą się od katalogu app.
+        Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+
         _host = BuildHost(args);
         Services = _host.Services;
         _host.Start();
@@ -37,10 +43,17 @@ sealed class Program
 
     private static IHost BuildHost(string[] args) =>
         Host.CreateDefaultBuilder(args)
+            .UseContentRoot(AppContext.BaseDirectory)
             .ConfigureAppConfiguration((_, config) =>
             {
                 config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
                 config.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+            })
+            .ConfigureLogging(logging =>
+            {
+                // WinExe nie ma widocznej konsoli — pełny log do pliku obok exe.
+                logging.AddProvider(new Services.FileLoggerProvider(
+                    Path.Combine(AppContext.BaseDirectory, "logs", "jarvis.log")));
             })
             .ConfigureServices((context, services) =>
             {

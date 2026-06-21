@@ -16,6 +16,20 @@ public sealed class JarvisOptions
     public AudioOptions Audio { get; set; } = new();
     public BrowserOptions Browser { get; set; } = new();
     public MediaOptions Media { get; set; } = new();
+    public PushToTalkOptions PushToTalk { get; set; } = new();
+}
+
+/// <summary>Globalny skrót „push-to-talk" (hold-to-talk) — alternatywa dla słowa-klucza.</summary>
+public sealed class PushToTalkOptions
+{
+    /// <summary>Czy push-to-talk jest aktywny.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Klawisz przytrzymania. Nazwy: RightCtrl, LeftCtrl, RightShift, RightAlt, Pause, ScrollLock,
+    /// CapsLock, F8, F9, F10, Insert, End. Domyślnie RightCtrl (RightAlt unikać — AltGr na PL).
+    /// </summary>
+    public string Key { get; set; } = "RightCtrl";
 }
 
 /// <summary>Przetwarzanie multimediów (file_processor — audio/wideo przez ffmpeg).</summary>
@@ -61,6 +75,12 @@ public sealed class LlmOptions
 
     /// <summary>Liczba ponowień przy błędach przejściowych (5xx/408/429). 0 = bez ponowień.</summary>
     public int MaxRetries { get; set; } = 2;
+
+    /// <summary>
+    /// Czy pozwolić modelowi „myśleć" (reasoning). Domyślnie false — dla Qwen3 dopisuje
+    /// <c>/no_think</c> do promptu, co znacząco skraca czas odpowiedzi (brak fazy rozumowania).
+    /// </summary>
+    public bool EnableThinking { get; set; }
 }
 
 /// <summary>Model wizji (multimodalny). Domyślnie ten sam endpoint co LLM.</summary>
@@ -127,13 +147,32 @@ public sealed class WakeWordOptions
     public string Keyword { get; set; } = "jarvis";
 
     /// <summary>Czułość/próg detekcji 0..1 (wyższa = więcej detekcji, więcej fałszywych).</summary>
-    public float Sensitivity { get; set; } = 0.5f;
+    public float Sensitivity { get; set; } = 0.6f;
+
+    /// <summary>
+    /// openWakeWord: liczba kolejnych ramek powyżej progu wymagana do wyzwolenia (NanoWakeWord
+    /// TriggerLevel). Niższa = szybsza/łatwiejsza detekcja (krótkie piki łapią), ale więcej
+    /// fałszywych. Domyślnie 2 — „Hey Jarvis" daje krótki pik, 4 (domyślne biblioteki) go gubi.
+    /// </summary>
+    public int TriggerLevel { get; set; } = 2;
 }
 
 /// <summary>Parametry przechwytywania audio i detekcji aktywności głosowej (VAD).</summary>
 public sealed class AudioOptions
 {
     public int SampleRate { get; set; } = 16000;
+
+    /// <summary>
+    /// Nazwa urządzenia wejściowego (mikrofonu). Puste = systemowe domyślne. Dopasowywane
+    /// po nazwie (NAudio WaveIn skraca nazwy do 31 znaków), ustawiane z menu w trayu.
+    /// </summary>
+    public string InputDeviceName { get; set; } = "";
+
+    /// <summary>
+    /// Nazwa urządzenia wyjściowego (głośniki/słuchawki) do odtwarzania TTS. Puste = systemowe
+    /// domyślne. Ustawiane z menu w trayu.
+    /// </summary>
+    public string OutputDeviceName { get; set; } = "";
 
     /// <summary>Próg RMS uznania ramki za mowę (port z _Old/main.py).</summary>
     public double SpeechThreshold { get; set; } = 0.008;

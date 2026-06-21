@@ -24,6 +24,10 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
     private short[] _pcm = Array.Empty<short>();
     private bool _running;
 
+    // Diagnostyka score'u wake-worda.
+    private int _scoreFrames;
+    private float _peakScore;
+
     public OpenWakeWordDetector(
         IAudioCapture capture,
         IOptions<JarvisOptions> options,
@@ -51,12 +55,25 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
 
         try
         {
+            // NanoWakeWord ładuje modele ONNX z katalogu „models/" (względem bieżącego katalogu).
+            // Wbudowane modele trzeba najpierw wypakować — bez tego konstruktor runtime rzuca
+            // „models/melspectrogram.onnx doesn't exist" i wykrywanie byłoby cicho wyłączone.
+            WakeWordUtil.ExtractModels(typeof(WakeWordRuntime).Assembly, false);
+
             _runtime = new WakeWordRuntime(new WakeWordRuntimeConfig
             {
                 WakeWords = new[]
                 {
-                    new WakeWordConfig { Model = _options.Model, Threshold = ToThreshold(_options.Sensitivity) },
+                    new WakeWordConfig
+                    {
+                        Model = _options.Model,
+                        Threshold = ToThreshold(_options.Sensitivity),
+                        TriggerLevel = _options.TriggerLevel,
+                    },
                 },
+                // Diagnostyka: śledzi szczytowy score i loguje go okresowo (zawsze), a detekcję
+                // natychmiast — pozwala potwierdzić, jak wysoko dochodzi score przy „Hey Jarvis".
+                DebugAction = OnWakeScore,
             });
         }
         catch (Exception ex)
@@ -70,7 +87,8 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
 
         _capture.FrameAvailable += OnFrame;
         _running = true;
-        _logger.LogInformation("openWakeWord uruchomiony (model: {Model}).", _options.Model);
+        _logger.LogInformation("openWakeWord uruchomiony (model: {Model}, próg {Threshold:F2}, TriggerLevel {Trigger}).",
+            _options.Model, ToThreshold(_options.Sensitivity), _options.TriggerLevel);
     }
 
     public void Stop()
@@ -100,6 +118,24 @@ public sealed class OpenWakeWordDetector : IWakeWordDetector
             _logger.LogInformation("Wykryto słowo-klucz (openWakeWord).");
             Detected?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    // Wywoływane przez NanoWakeWord dla każdej predykcji. Loguje szczyt co ~2 s + detekcję od razu.
+    private void OnWakeScore(string model, float score, bool detected)
+    {
+        if (score > _peakScore)
+            _peakScore = score;
+
+        if (detected)
+            _logger.LogInformation("Wake-word [{Model}] score {Score:F2} ← DETEKCJA.", model, score);
+
+        if (++_scoreFrames < 24)
+            return;
+
+        _logger.LogInformation("Wake-word [{Model}] szczyt score (~2 s): {Peak:F3} (próg {Threshold:F2}).",
+            model, _peakScore, ToThreshold(_options.Sensitivity));
+        _scoreFrames = 0;
+        _peakScore = 0f;
     }
 
     /// <summary>Konwertuje próbki float (-1..1) na 16-bit PCM z przycięciem zakresu, zapisując do <paramref name="pcm"/>.</summary>

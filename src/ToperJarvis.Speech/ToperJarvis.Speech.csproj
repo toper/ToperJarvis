@@ -14,6 +14,9 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Porcupine" Version="4.0.2" />
     <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <!-- CUDA: STT na GPU (NVIDIA, np. RTX 5070 Ti) — ~10× szybciej niż CPU.
+         Runtime CPU zostaje jako fallback dla maszyn bez NVIDIA (Whisper.net sam wybiera). -->
+    <PackageReference Include="Whisper.net.Runtime.Cuda" Version="1.9.1" />
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
   </ItemGroup>
 </Project>
