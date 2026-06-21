@@ -75,13 +75,20 @@ public sealed class FileProcessorTool : IJarvisTool
         {
             FileKind.Image => await ProcessImageAsync(filePath, extension, question, cancellationToken),
             FileKind.Text => await ProcessTextAsync(filePath, question, cancellationToken),
-            _ => $"Nieobsługiwany typ pliku ({extension}). Obsługiwane: obrazy oraz pliki tekstowe/kod.",
+            _ => string.IsNullOrEmpty(extension)
+                ? "Nieobsługiwany typ pliku (brak rozszerzenia). Obsługiwane: obrazy oraz pliki tekstowe/kod."
+                : $"Nieobsługiwany typ pliku ({extension}). Obsługiwane: obrazy oraz pliki tekstowe/kod.",
         };
     }
 
     private async Task<string> ProcessImageAsync(
         string filePath, string extension, string? question, CancellationToken ct)
     {
+        // Defensywnie: Classify gwarantuje obecność klucza, ale TryGetValue zabezpiecza przed
+        // rozjazdem, gdyby logika klasyfikacji/słownik się rozeszły przy refaktorze.
+        if (!ImageMediaTypes.TryGetValue(extension, out var mediaType))
+            return $"Nieobsługiwany format obrazu ({extension}).";
+
         byte[] data;
         try
         {
@@ -97,7 +104,7 @@ public sealed class FileProcessorTool : IJarvisTool
             return "Nie udało się odczytać pliku obrazu.";
         }
 
-        var image = new VisionImage(data, ImageMediaTypes[extension]);
+        var image = new VisionImage(data, mediaType);
         return await _vision.DescribeAsync(ResolveImagePrompt(question), image, ct);
     }
 
