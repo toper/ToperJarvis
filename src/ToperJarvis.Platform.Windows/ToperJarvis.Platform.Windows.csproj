@@ -4,6 +4,11 @@
     <ProjectReference Include="..\ToperJarvis.Abstractions\ToperJarvis.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+  </ItemGroup>
+
   <PropertyGroup>
     <!-- Nadpisuje net10.0 z Directory.Build.props — implementacje zależne od Windows -->
     <TargetFramework>net10.0-windows</TargetFramework>
