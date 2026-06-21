@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using OpenAI;
 using ToperJarvis.Abstractions.Configuration;
+using ToperJarvis.Abstractions.Vision;
 
 namespace ToperJarvis.Llm;
 
@@ -30,6 +31,8 @@ public static class LlmServiceCollectionExtensions
                 .UseFunctionInvocation()
                 .Build();
         });
+
+        services.AddSingleton<IVisionClient, VisionClient>();
 
         return services;
     }
