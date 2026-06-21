@@ -392,8 +392,11 @@ public sealed class CodeHelperTool : IJarvisTool
         var desc = (description ?? "").ToLowerInvariant();
         bool Has(params string[] kws) => kws.Any(k => desc.Contains(k, StringComparison.Ordinal));
 
-        // Debug z ekranu — gdy użytkownik odwołuje się do tego, co widać na ekranie.
-        if (Has("na ekranie", "zrzut ekranu", "z ekranu", "screenshot", "screen_debug", "on screen", "on the screen"))
+        // Debug z ekranu — gdy użytkownik PYTA o to, co widać na ekranie, a nie prosi o napisanie kodu
+        // (np. „napisz skrypt do screenshotów" to write, nie screen_debug).
+        var wantsNewCode = Has("napisz", "stwórz", "wygeneruj", "skrypt", "program", "write", "create", "generate");
+        if (!wantsNewCode &&
+            Has("na ekranie", "zrzut ekranu", "z ekranu", "screenshot", "screen_debug", "on screen", "on the screen"))
             return "screen_debug";
 
         if (Has("optimize", "refactor", "clean up", "improve", "make it better", "optymalizuj", "ulepsz", "uprość") &&

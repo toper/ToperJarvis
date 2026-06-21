@@ -42,6 +42,7 @@ public class CodeHelperToolTests
     [InlineData("wyjaśnij ten kod", null, "print(1)", "explain")]
     [InlineData("co za błąd widać na ekranie?", null, null, "screen_debug")]
     [InlineData("zrób zrzut ekranu i powiedz co jest nie tak", null, null, "screen_debug")]
+    [InlineData("napisz skrypt do robienia screenshotów", null, null, "write")] // pisanie kodu, nie debug ekranu
     public void DetectIntent_routuje_zamiar(string desc, string? filePath, string? code, string expected)
     {
         Assert.Equal(expected, CodeHelperTool.DetectIntent(desc, filePath, code));
