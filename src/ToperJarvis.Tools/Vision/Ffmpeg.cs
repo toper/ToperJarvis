@@ -9,9 +9,13 @@ namespace ToperJarvis.Tools.Vision;
 /// </summary>
 internal static class Ffmpeg
 {
+    // Twardy bezpiecznik na rozmiar zdekodowanego PCM (~140 min mono f32 @ 16 kHz) — chroni
+    // przed wyczerpaniem pamięci, gdy mały plik wideo zawiera bardzo długą ścieżkę audio.
+    private const long MaxPcmBytes = 512L * 1024 * 1024;
+
     /// <summary>
     /// Dekoduje audio z <paramref name="filePath"/> (audio lub wideo) do próbek mono float32.
-    /// Rzuca <see cref="FfmpegException"/> przy braku ffmpeg lub błędzie dekodowania.
+    /// Rzuca <see cref="FfmpegException"/> przy braku ffmpeg, błędzie dekodowania lub zbyt długim nagraniu.
     /// </summary>
     public static async Task<float[]> DecodeToPcmAsync(
         string ffmpegPath, string filePath, int sampleRate, CancellationToken ct)
@@ -47,20 +51,39 @@ internal static class Ffmpeg
 
         using (process)
         {
-            using var output = new MemoryStream();
-            var copyTask = process.StandardOutput.BaseStream.CopyToAsync(output, ct);
+            // stderr czytamy współbieżnie ze stdout, by nie zapełnić bufora pipe (klasyczny deadlock).
             var errorTask = process.StandardError.ReadToEndAsync(ct);
-            await process.WaitForExitAsync(ct);
-            await copyTask;
-
-            if (process.ExitCode != 0)
+            try
             {
-                var error = await errorTask;
-                var tail = error.Length > 300 ? error[^300..] : error;
-                throw new FfmpegException($"ffmpeg zakończył się błędem (kod {process.ExitCode}): {tail}");
-            }
+                using var output = new MemoryStream();
+                var buffer = new byte[81920];
+                var stdout = process.StandardOutput.BaseStream;
+                int read;
+                while ((read = await stdout.ReadAsync(buffer, ct)) > 0)
+                {
+                    output.Write(buffer, 0, read);
+                    if (output.Length > MaxPcmBytes)
+                        throw new FfmpegException("Nagranie jest zbyt długie do transkrypcji.");
+                }
 
-            return PcmBytesToFloats(output.ToArray());
+                await process.WaitForExitAsync(ct);
+                var error = await errorTask;
+
+                if (process.ExitCode != 0)
+                {
+                    var tail = error.Length > 300 ? error[^300..] : error;
+                    throw new FfmpegException($"ffmpeg zakończył się błędem (kod {process.ExitCode}): {tail}");
+                }
+
+                return PcmBytesToFloats(output.ToArray());
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or FfmpegException)
+            {
+                // Anulowanie lub przekroczenie limitu — ubij ffmpeg, by nie został sierotą.
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* już zakończony */ }
+                try { await errorTask; } catch { /* obserwacja, ignorujemy */ }
+                throw;
+            }
         }
     }
 

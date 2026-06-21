@@ -222,6 +222,11 @@ public sealed class FileProcessorTool : IJarvisTool
             _logger.LogWarning(ex, "Nie udało się zdekodować audio z {Path}.", filePath);
             return ex.Message;
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Błąd przetwarzania pliku audio/wideo {Path}.", filePath);
+            return "Nie udało się przetworzyć pliku audio/wideo.";
+        }
 
         if (samples.Length == 0)
             return "Plik nie zawiera ścieżki audio.";
