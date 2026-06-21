@@ -58,6 +58,9 @@ public sealed class LlmOptions
 
     /// <summary>Limit czasu pojedynczego żądania (sekundy).</summary>
     public int TimeoutSeconds { get; set; } = 120;
+
+    /// <summary>Liczba ponowień przy błędach przejściowych (5xx/408/429). 0 = bez ponowień.</summary>
+    public int MaxRetries { get; set; } = 2;
 }
 
 /// <summary>Model wizji (multimodalny). Domyślnie ten sam endpoint co LLM.</summary>
