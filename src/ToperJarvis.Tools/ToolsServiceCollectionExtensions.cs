@@ -29,8 +29,8 @@ public static class ToolsServiceCollectionExtensions
         services.AddSingleton<IJarvisTool, CodeHelperTool>();
         services.AddSingleton<IJarvisTool, DevAgentTool>();
         services.AddSingleton<IJarvisTool, ScreenProcessorTool>();
+        services.AddSingleton<IJarvisTool, FileProcessorTool>();
 
-        // TODO (Krok 11): file_processor — analiza pliku/obrazu modelem wizji.
         return services;
     }
 }
