@@ -16,6 +16,7 @@ namespace ToperJarvis.Tools.Vision;
 public sealed class FileProcessorTool : IJarvisTool
 {
     private const long MaxImageBytes = 20 * 1024 * 1024; // 20 MB
+    private const long MaxReadableBytes = 50 * 1024 * 1024; // 50 MB (dokumenty i pliki tekstowe)
     private const int MaxTextChars = 40_000;
 
     private const string DefaultImagePrompt =
@@ -127,6 +128,9 @@ public sealed class FileProcessorTool : IJarvisTool
         string content;
         try
         {
+            if (TooLargeMessage(filePath) is { } tooLarge)
+                return tooLarge;
+
             content = await File.ReadAllTextAsync(filePath, ct);
         }
         catch (Exception ex)
@@ -135,7 +139,7 @@ public sealed class FileProcessorTool : IJarvisTool
             return "Nie udało się odczytać pliku.";
         }
 
-        return await AnalyzeTextWithLlmAsync(content, question, "Plik jest pusty.", ct);
+        return await AnalyzeTextWithLlmAsync(content, question, "Plik jest pusty.", filePath, ct);
     }
 
     private async Task<string> ProcessDocumentAsync(
@@ -144,6 +148,9 @@ public sealed class FileProcessorTool : IJarvisTool
         string content;
         try
         {
+            if (TooLargeMessage(filePath) is { } tooLarge)
+                return tooLarge;
+
             content = ExtractDocument(filePath, extension);
         }
         catch (Exception ex)
@@ -153,7 +160,16 @@ public sealed class FileProcessorTool : IJarvisTool
         }
 
         return await AnalyzeTextWithLlmAsync(
-            content, question, "Nie udało się wyciągnąć tekstu z dokumentu (może być skanem/obrazem).", ct);
+            content, question, "Nie udało się wyciągnąć tekstu z dokumentu (może być skanem/obrazem).", filePath, ct);
+    }
+
+    /// <summary>Zwraca komunikat, gdy plik przekracza limit <see cref="MaxReadableBytes"/>, inaczej null.</summary>
+    private static string? TooLargeMessage(string filePath)
+    {
+        var length = new FileInfo(filePath).Length;
+        return length > MaxReadableBytes
+            ? $"Plik jest za duży ({length / (1024 * 1024)} MB; limit {MaxReadableBytes / (1024 * 1024)} MB)."
+            : null;
     }
 
     private string ProcessArchive(string filePath)
@@ -181,7 +197,7 @@ public sealed class FileProcessorTool : IJarvisTool
 
     /// <summary>Wspólna analiza wydobytego tekstu przez LLM (dla plików tekstowych i dokumentów).</summary>
     private async Task<string> AnalyzeTextWithLlmAsync(
-        string content, string? question, string emptyMessage, CancellationToken ct)
+        string content, string? question, string emptyMessage, string filePath, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(content))
             return emptyMessage;
@@ -198,7 +214,7 @@ public sealed class FileProcessorTool : IJarvisTool
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Błąd analizy zawartości pliku przez LLM.");
+            _logger.LogWarning(ex, "Błąd analizy zawartości pliku {Path} przez LLM.", filePath);
             return "Nie udało się przeanalizować pliku.";
         }
     }
