@@ -87,6 +87,9 @@ public sealed class WebcamService : IDisposable
     public void Dispose()
     {
         try { _cts?.Cancel(); } catch { /* ignoruj */ }
+        // Poczekaj aż pętla się zakończy (zwolni kamerę) zanim zwolnimy CTS — inaczej dotknęłaby
+        // już zwolnionego tokenu (ObjectDisposedException na wątku tła).
+        try { _loop?.Wait(TimeSpan.FromSeconds(2)); } catch { /* ignoruj */ }
         _cts?.Dispose();
         _latest = null;
     }

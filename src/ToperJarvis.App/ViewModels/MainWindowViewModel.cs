@@ -127,10 +127,9 @@ public partial class MainWindowViewModel : ViewModelBase
         try
         {
             using var ms = new MemoryStream(jpeg);
-            var bmp = new Bitmap(ms);
-            var old = CameraFrame;
-            CameraFrame = bmp;
-            old?.Dispose();
+            // Nie zwalniamy poprzedniej bitmapy ręcznie — wątek renderujący Avalonii może jeszcze
+            // jej używać (race → AccessViolation). Mała miniatura, GC sobie poradzi.
+            CameraFrame = new Bitmap(ms);
         }
         catch { /* uszkodzona klatka — pomijamy */ }
     }

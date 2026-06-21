@@ -26,11 +26,14 @@ public sealed class HomeAssistantClient : IDisposable
         if (string.IsNullOrWhiteSpace(ha.BaseUrl) || string.IsNullOrWhiteSpace(ha.Token))
             return;
 
-        _http = new HttpClient
+        // Błędny adres (np. bez schematu) nie może wywalić startu aplikacji — degradujemy do „wyłączone".
+        if (!Uri.TryCreate(ha.BaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out var baseUri))
         {
-            BaseAddress = new Uri(ha.BaseUrl.TrimEnd('/') + "/"),
-            Timeout = TimeSpan.FromSeconds(8),
-        };
+            _logger.LogWarning("HA: nieprawidłowy BaseUrl '{Url}' — integracja wyłączona.", ha.BaseUrl);
+            return;
+        }
+
+        _http = new HttpClient { BaseAddress = baseUri, Timeout = TimeSpan.FromSeconds(8) };
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ha.Token);
     }
 

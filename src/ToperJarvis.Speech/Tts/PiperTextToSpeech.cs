@@ -22,6 +22,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
     private readonly ILogger<PiperTextToSpeech> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _tempDir;
+    private readonly System.Text.StringBuilder _stderr = new();
 
     private Process? _piper;
     private int _counter;
@@ -53,11 +54,24 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
             await piper.StandardInput.WriteLineAsync(line.AsMemory(), ct);
             await piper.StandardInput.FlushAsync(ct);
 
-            // Piper wypisuje ścieżkę gotowego pliku na stdout — czekamy na ten sygnał.
-            var done = await piper.StandardOutput.ReadLineAsync(ct);
-            if (done is null)
+            // Piper wypisuje ścieżkę gotowego pliku WAV na stdout. Pomijamy ewentualne inne linie
+            // (banner/log), by nie rozjechać parowania żądanie↔odpowiedź; limit chroni przed zawisem.
+            string? donePath = null;
+            for (var i = 0; i < 8; i++)
             {
-                _logger.LogWarning("Piper zakończył proces nieoczekiwanie — restart przy kolejnym zdaniu.");
+                var l = await piper.StandardOutput.ReadLineAsync(ct);
+                if (l is null)
+                    break; // proces padł
+                if (l.Trim().EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+                {
+                    donePath = l.Trim();
+                    break;
+                }
+            }
+
+            if (donePath is null)
+            {
+                _logger.LogWarning("Piper nie zwrócił ścieżki audio (proces padł?). stderr: {Err}", RecentStderr());
                 ResetProcess();
                 return;
             }
@@ -66,6 +80,10 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
             {
                 await PlayAsync(outPath, ct);
                 TryDelete(outPath);
+            }
+            else
+            {
+                _logger.LogWarning("Piper nie utworzył pliku {Path}. stderr: {Err}", outPath, RecentStderr());
             }
         }
         catch (OperationCanceledException)
@@ -117,16 +135,34 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
         var process = new Process { StartInfo = psi };
         process.Start();
 
-        // Drenaż stderr w tle (logi per zdanie) — inaczej pełny bufor zablokowałby proces.
+        // Drenaż stderr w tle + zachowanie ostatnich linii do diagnostyki (inaczej pełny bufor blokuje proces).
         _ = Task.Run(async () =>
         {
-            try { await process.StandardError.ReadToEndAsync(); }
+            try
+            {
+                string? l;
+                while ((l = await process.StandardError.ReadLineAsync()) is not null)
+                {
+                    lock (_stderr)
+                    {
+                        _stderr.AppendLine(l);
+                        if (_stderr.Length > 2000)
+                            _stderr.Remove(0, _stderr.Length - 2000);
+                    }
+                }
+            }
             catch { /* proces zakończony */ }
         });
 
         _piper = process;
         _logger.LogInformation("Piper uruchomiony (trwały proces, model: {Voice}).", _options.VoiceModelPath);
         return _piper;
+    }
+
+    private string RecentStderr()
+    {
+        lock (_stderr)
+            return _stderr.Length == 0 ? "(brak)" : _stderr.ToString().Trim();
     }
 
     private void ResetProcess()

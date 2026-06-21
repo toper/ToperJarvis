@@ -35,10 +35,15 @@ public sealed class DgxClient : IDisposable
         _enabled = dgx.Enabled && !string.IsNullOrWhiteSpace(_host) && !string.IsNullOrWhiteSpace(_user);
     }
 
+    // Atomowa wymiana całego kompletu metryk (referencja) — odczyt z UI bez ryzyka „rozdarcia" double.
+    private volatile Metrics? _latest;
+
     /// <summary>Ostatnie metryki GPU lub null, gdy brak danych.</summary>
-    public double? GpuUtil { get; private set; }
-    public double? PowerW { get; private set; }
-    public double? TempC { get; private set; }
+    public double? GpuUtil => _latest?.Util;
+    public double? PowerW => _latest?.Power;
+    public double? TempC => _latest?.Temp;
+
+    private sealed record Metrics(double Util, double Power, double Temp);
 
     public void Start()
     {
@@ -91,8 +96,15 @@ public sealed class DgxClient : IDisposable
             {
                 _logger.LogDebug(ex, "DGX: błąd strumienia SSH — ponawiam.");
             }
+            finally
+            {
+                // Zwolnij proces tej próby — bez tego każdy reconnect wyciekałby uchwyt.
+                try { if (_proc is { HasExited: false }) _proc.Kill(true); } catch { /* ignoruj */ }
+                _proc?.Dispose();
+                _proc = null;
+            }
 
-            GpuUtil = PowerW = TempC = null; // brak świeżych danych
+            _latest = null; // brak świeżych danych
             try { await Task.Delay(TimeSpan.FromSeconds(10), ct); } catch { break; }
         }
     }
@@ -103,9 +115,8 @@ public sealed class DgxClient : IDisposable
         if (parts.Length < 3)
             return;
 
-        GpuUtil = TryNum(parts[0]);
-        PowerW = TryNum(parts[1]);
-        TempC = TryNum(parts[2]);
+        if (TryNum(parts[0]) is { } util && TryNum(parts[1]) is { } power && TryNum(parts[2]) is { } temp)
+            _latest = new Metrics(util, power, temp);
     }
 
     private static double? TryNum(string s) =>

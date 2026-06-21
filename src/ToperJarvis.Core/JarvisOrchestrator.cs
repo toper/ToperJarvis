@@ -38,7 +38,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
     // Push-to-talk: bufor nagrania między wciśnięciem a puszczeniem klawisza.
     private readonly List<float> _pttBuffer = new();
-    private bool _pttActive;
+    private volatile bool _pttActive;
 
     public JarvisOrchestrator(
         IAudioCapture capture,

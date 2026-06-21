@@ -15,17 +15,20 @@ public sealed class NAudioOutput : IAudioOutput
 {
     private readonly ILogger<NAudioOutput> _logger;
     private string? _deviceName;
+    private int _deviceNumber;
 
     public NAudioOutput(IOptions<JarvisOptions> options, ILogger<NAudioOutput> logger)
     {
         _logger = logger;
         var configured = options.Value.Audio.OutputDeviceName;
         _deviceName = string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
+        _deviceNumber = ResolveDeviceNumber(_deviceName);
     }
 
     public string? SelectedDeviceName => _deviceName;
 
-    public int DeviceNumber => ResolveDeviceNumber(_deviceName);
+    // Buforowany numer — enumeracja winmm tylko przy zmianie urządzenia, nie przy każdym odtworzeniu.
+    public int DeviceNumber => _deviceNumber;
 
     public IReadOnlyList<AudioOutputDevice> GetOutputDevices()
     {
@@ -48,6 +51,7 @@ public sealed class NAudioOutput : IAudioOutput
             return;
 
         _deviceName = normalized;
+        _deviceNumber = ResolveDeviceNumber(normalized);
         _logger.LogInformation("Zmiana wyjścia audio na: {Device}", normalized ?? "(domyślne)");
     }
 
