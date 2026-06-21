@@ -13,5 +13,11 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.9" />
+    <!-- Ekstrakcja tekstu z dokumentów (file_processor) -->
+    <PackageReference Include="PdfPig" Version="0.1.10" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <!-- Nadpisuje podatną wersję 8.0.0 wciąganą tranzytywnie przez ClosedXML/OpenXml (NU1903). -->
+    <PackageReference Include="System.IO.Packaging" Version="10.0.0" />
   </ItemGroup>
 </Project>

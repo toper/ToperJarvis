@@ -9,12 +9,14 @@ namespace ToperJarvis.Tools.Vision;
 
 /// <summary>
 /// Narzędzie <c>file_processor</c> — analizuje plik wskazany ścieżką:
-/// obrazy przez model wizji (opis/OCR), pliki tekstowe i kod przez LLM (streszczenie/analiza).
-/// Formaty wymagające ciężkich zależności (PDF, Office, audio/wideo) nie są obsługiwane w v1.
+/// obrazy przez model wizji (opis/OCR), dokumenty (PDF/docx/xlsx/pptx) oraz pliki tekstowe/kod
+/// przez LLM (streszczenie/analiza), archiwa .zip przez listowanie zawartości.
+/// Audio i wideo obsługuje osobny krok (ffmpeg + Whisper).
 /// </summary>
 public sealed class FileProcessorTool : IJarvisTool
 {
     private const long MaxImageBytes = 20 * 1024 * 1024; // 20 MB
+    private const long MaxReadableBytes = 50 * 1024 * 1024; // 50 MB (dokumenty i pliki tekstowe)
     private const int MaxTextChars = 40_000;
 
     private const string DefaultImagePrompt =
@@ -38,6 +40,16 @@ public sealed class FileProcessorTool : IJarvisTool
         ".c", ".cpp", ".h", ".hpp", ".go", ".rs", ".rb", ".php", ".sh", ".ps1", ".sql", ".css",
     };
 
+    private static readonly HashSet<string> DocumentExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf", ".docx", ".xlsx", ".pptx",
+    };
+
+    private static readonly HashSet<string> ArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".zip",
+    };
+
     private readonly IVisionClient _vision;
     private readonly IChatClient _chat;
     private readonly ILogger<FileProcessorTool> _logger;
@@ -53,11 +65,12 @@ public sealed class FileProcessorTool : IJarvisTool
 
     public AIFunction AsAIFunction() =>
         AIFunctionFactory.Create(ProcessAsync, Name,
-            "Analizuje plik wskazany ścieżką: obrazy (opis/odczyt tekstu modelem wizji) oraz pliki " +
-            "tekstowe i kod (streszczenie/analiza). Używaj, gdy użytkownik prosi o opisanie, " +
-            "streszczenie lub odczytanie zawartości konkretnego pliku.");
+            "Analizuje plik wskazany ścieżką: obrazy (opis/odczyt tekstu modelem wizji), dokumenty " +
+            "(PDF, Word, Excel, PowerPoint), pliki tekstowe i kod (streszczenie/analiza) oraz archiwa " +
+            "ZIP (lista zawartości). Używaj, gdy użytkownik prosi o opisanie, streszczenie lub " +
+            "odczytanie zawartości konkretnego pliku.");
 
-    [Description("Analizuje zawartość pliku (obraz lub tekst).")]
+    [Description("Analizuje zawartość pliku (obraz, dokument, tekst lub archiwum).")]
     private async Task<string> ProcessAsync(
         [Description("Ścieżka do pliku.")] string filePath,
         [Description("Pytanie lub polecenie dotyczące pliku (puste = opis/streszczenie).")]
@@ -74,10 +87,12 @@ public sealed class FileProcessorTool : IJarvisTool
         return Classify(extension) switch
         {
             FileKind.Image => await ProcessImageAsync(filePath, extension, question, cancellationToken),
+            FileKind.Document => await ProcessDocumentAsync(filePath, extension, question, cancellationToken),
             FileKind.Text => await ProcessTextAsync(filePath, question, cancellationToken),
+            FileKind.Archive => ProcessArchive(filePath),
             _ => string.IsNullOrEmpty(extension)
-                ? "Nieobsługiwany typ pliku (brak rozszerzenia). Obsługiwane: obrazy oraz pliki tekstowe/kod."
-                : $"Nieobsługiwany typ pliku ({extension}). Obsługiwane: obrazy oraz pliki tekstowe/kod.",
+                ? "Nieobsługiwany typ pliku (brak rozszerzenia). Obsługiwane: obrazy, dokumenty (PDF/Word/Excel/PowerPoint), pliki tekstowe/kod, archiwa ZIP."
+                : $"Nieobsługiwany typ pliku ({extension}). Obsługiwane: obrazy, dokumenty (PDF/Word/Excel/PowerPoint), pliki tekstowe/kod, archiwa ZIP.",
         };
     }
 
@@ -113,6 +128,9 @@ public sealed class FileProcessorTool : IJarvisTool
         string content;
         try
         {
+            if (TooLargeMessage(filePath) is { } tooLarge)
+                return tooLarge;
+
             content = await File.ReadAllTextAsync(filePath, ct);
         }
         catch (Exception ex)
@@ -121,8 +139,68 @@ public sealed class FileProcessorTool : IJarvisTool
             return "Nie udało się odczytać pliku.";
         }
 
+        return await AnalyzeTextWithLlmAsync(content, question, "Plik jest pusty.", filePath, ct);
+    }
+
+    private async Task<string> ProcessDocumentAsync(
+        string filePath, string extension, string? question, CancellationToken ct)
+    {
+        string content;
+        try
+        {
+            if (TooLargeMessage(filePath) is { } tooLarge)
+                return tooLarge;
+
+            content = ExtractDocument(filePath, extension);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nie udało się odczytać dokumentu {Path}.", filePath);
+            return "Nie udało się odczytać dokumentu.";
+        }
+
+        return await AnalyzeTextWithLlmAsync(
+            content, question, "Nie udało się wyciągnąć tekstu z dokumentu (może być skanem/obrazem).", filePath, ct);
+    }
+
+    /// <summary>Zwraca komunikat, gdy plik przekracza limit <see cref="MaxReadableBytes"/>, inaczej null.</summary>
+    private static string? TooLargeMessage(string filePath)
+    {
+        var length = new FileInfo(filePath).Length;
+        return length > MaxReadableBytes
+            ? $"Plik jest za duży ({length / (1024 * 1024)} MB; limit {MaxReadableBytes / (1024 * 1024)} MB)."
+            : null;
+    }
+
+    private string ProcessArchive(string filePath)
+    {
+        try
+        {
+            return FileExtractors.ListZip(filePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nie udało się odczytać archiwum {Path}.", filePath);
+            return "Nie udało się odczytać archiwum.";
+        }
+    }
+
+    /// <summary>Wyciąga tekst z dokumentu wg rozszerzenia (synchronicznie).</summary>
+    private static string ExtractDocument(string filePath, string extension) => extension.ToLowerInvariant() switch
+    {
+        ".pdf" => FileExtractors.ExtractPdf(filePath),
+        ".docx" => FileExtractors.ExtractDocx(filePath),
+        ".xlsx" => FileExtractors.ExtractXlsx(filePath),
+        ".pptx" => FileExtractors.ExtractPptx(filePath),
+        _ => "",
+    };
+
+    /// <summary>Wspólna analiza wydobytego tekstu przez LLM (dla plików tekstowych i dokumentów).</summary>
+    private async Task<string> AnalyzeTextWithLlmAsync(
+        string content, string? question, string emptyMessage, string filePath, CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(content))
-            return "Plik jest pusty.";
+            return emptyMessage;
 
         var truncated = content.Length > MaxTextChars ? content[..MaxTextChars] : content;
         var system =
@@ -136,16 +214,18 @@ public sealed class FileProcessorTool : IJarvisTool
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Błąd analizy pliku tekstowego {Path}.", filePath);
+            _logger.LogWarning(ex, "Błąd analizy zawartości pliku {Path} przez LLM.", filePath);
             return "Nie udało się przeanalizować pliku.";
         }
     }
 
-    /// <summary>Klasyfikuje plik po rozszerzeniu na obraz / tekst / nieobsługiwany.</summary>
+    /// <summary>Klasyfikuje plik po rozszerzeniu na obraz / dokument / tekst / archiwum / nieobsługiwany.</summary>
     internal static FileKind Classify(string extension)
     {
         if (ImageMediaTypes.ContainsKey(extension)) return FileKind.Image;
+        if (DocumentExtensions.Contains(extension)) return FileKind.Document;
         if (TextExtensions.Contains(extension)) return FileKind.Text;
+        if (ArchiveExtensions.Contains(extension)) return FileKind.Archive;
         return FileKind.Unsupported;
     }
 
@@ -158,7 +238,9 @@ public sealed class FileProcessorTool : IJarvisTool
     internal enum FileKind
     {
         Image,
+        Document,
         Text,
+        Archive,
         Unsupported,
     }
 }
