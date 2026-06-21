@@ -13,6 +13,7 @@ x86/
 *.sln.docstates
 .vs/
 artifacts/
+publish/
 project.lock.json
 project.fragment.lock.json
 

@@ -53,3 +53,23 @@ assets/
   piper/geralt.onnx
   piper/geralt.onnx.json
 ```
+
+## Budowanie wersji do dystrybucji (self-contained)
+
+Skrypt `scripts/publish.ps1` buduje samodzielny plik wykonywalny (bez wymaganego .NET na
+maszynie docelowej):
+
+```powershell
+pwsh scripts/publish.ps1                       # Release, win-x64 → publish/
+pwsh scripts/publish.ps1 -ReadyToRun           # + szybszy start (większy plik)
+pwsh scripts/publish.ps1 -Output C:\Dist\Toper # inny katalog wyjściowy
+```
+
+Skrypt: publikuje single-file self-contained, kopiuje obok `assets/` (jeśli istnieje lokalnie)
+i usuwa deweloperski `appsettings.Local.json`.
+
+Wymagania na maszynie docelowej:
+- osiągalny endpoint vLLM (`Jarvis:Llm:BaseUrl` w `appsettings.json`),
+- zawartość `assets/` (modele Whisper/Piper — jak wyżej),
+- **ffmpeg** na PATH — tylko jeśli używasz audio/wideo w `file_processor`
+  (lub ustaw `Jarvis:Media:FfmpegPath`).
