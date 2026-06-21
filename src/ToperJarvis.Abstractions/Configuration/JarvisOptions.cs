@@ -15,6 +15,14 @@ public sealed class JarvisOptions
     public WakeWordOptions WakeWord { get; set; } = new();
     public AudioOptions Audio { get; set; } = new();
     public BrowserOptions Browser { get; set; } = new();
+    public MediaOptions Media { get; set; } = new();
+}
+
+/// <summary>Przetwarzanie multimediów (file_processor — audio/wideo przez ffmpeg).</summary>
+public sealed class MediaOptions
+{
+    /// <summary>Ścieżka do ffmpeg. Domyślnie „ffmpeg" (z PATH).</summary>
+    public string FfmpegPath { get; set; } = "ffmpeg";
 }
 
 /// <summary>Sterowanie przeglądarką (narzędzie browser_control, Playwright).</summary>

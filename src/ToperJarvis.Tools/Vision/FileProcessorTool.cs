@@ -1,6 +1,9 @@
 using System.ComponentModel;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ToperJarvis.Abstractions.Configuration;
+using ToperJarvis.Abstractions.Speech;
 using ToperJarvis.Abstractions.Tools;
 using ToperJarvis.Abstractions.Vision;
 using ToperJarvis.Tools.Dev;
@@ -10,8 +13,8 @@ namespace ToperJarvis.Tools.Vision;
 /// <summary>
 /// Narzędzie <c>file_processor</c> — analizuje plik wskazany ścieżką:
 /// obrazy przez model wizji (opis/OCR), dokumenty (PDF/docx/xlsx/pptx) oraz pliki tekstowe/kod
-/// przez LLM (streszczenie/analiza), archiwa .zip przez listowanie zawartości.
-/// Audio i wideo obsługuje osobny krok (ffmpeg + Whisper).
+/// przez LLM (streszczenie/analiza), archiwa .zip przez listowanie zawartości, a audio i wideo
+/// przez transkrypcję (ffmpeg → Whisper), opcjonalnie analizowaną przez LLM.
 /// </summary>
 public sealed class FileProcessorTool : IJarvisTool
 {
@@ -50,15 +53,33 @@ public sealed class FileProcessorTool : IJarvisTool
         ".zip",
     };
 
+    // Audio i wideo trafiają do tej samej ścieżki — ffmpeg dekoduje ścieżkę audio z obu.
+    private static readonly HashSet<string> MediaExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac", ".wma", ".opus",
+        ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v",
+    };
+
     private readonly IVisionClient _vision;
     private readonly IChatClient _chat;
+    private readonly ISpeechToText _stt;
     private readonly ILogger<FileProcessorTool> _logger;
+    private readonly string _ffmpegPath;
+    private readonly int _sampleRate;
 
-    public FileProcessorTool(IVisionClient vision, IChatClient chat, ILogger<FileProcessorTool> logger)
+    public FileProcessorTool(
+        IVisionClient vision,
+        IChatClient chat,
+        ISpeechToText stt,
+        IOptions<JarvisOptions> options,
+        ILogger<FileProcessorTool> logger)
     {
         _vision = vision;
         _chat = chat;
+        _stt = stt;
         _logger = logger;
+        _ffmpegPath = options.Value.Media.FfmpegPath;
+        _sampleRate = options.Value.Audio.SampleRate;
     }
 
     public string Name => "file_processor";
@@ -66,11 +87,11 @@ public sealed class FileProcessorTool : IJarvisTool
     public AIFunction AsAIFunction() =>
         AIFunctionFactory.Create(ProcessAsync, Name,
             "Analizuje plik wskazany ścieżką: obrazy (opis/odczyt tekstu modelem wizji), dokumenty " +
-            "(PDF, Word, Excel, PowerPoint), pliki tekstowe i kod (streszczenie/analiza) oraz archiwa " +
-            "ZIP (lista zawartości). Używaj, gdy użytkownik prosi o opisanie, streszczenie lub " +
-            "odczytanie zawartości konkretnego pliku.");
+            "(PDF, Word, Excel, PowerPoint), pliki tekstowe i kod (streszczenie/analiza), archiwa " +
+            "ZIP (lista zawartości) oraz audio/wideo (transkrypcja mowy). Używaj, gdy użytkownik prosi " +
+            "o opisanie, streszczenie, odczytanie lub transkrypcję zawartości konkretnego pliku.");
 
-    [Description("Analizuje zawartość pliku (obraz, dokument, tekst lub archiwum).")]
+    [Description("Analizuje zawartość pliku (obraz, dokument, tekst, archiwum, audio lub wideo).")]
     private async Task<string> ProcessAsync(
         [Description("Ścieżka do pliku.")] string filePath,
         [Description("Pytanie lub polecenie dotyczące pliku (puste = opis/streszczenie).")]
@@ -90,9 +111,10 @@ public sealed class FileProcessorTool : IJarvisTool
             FileKind.Document => await ProcessDocumentAsync(filePath, extension, question, cancellationToken),
             FileKind.Text => await ProcessTextAsync(filePath, question, cancellationToken),
             FileKind.Archive => ProcessArchive(filePath),
+            FileKind.Media => await ProcessMediaAsync(filePath, question, cancellationToken),
             _ => string.IsNullOrEmpty(extension)
-                ? "Nieobsługiwany typ pliku (brak rozszerzenia). Obsługiwane: obrazy, dokumenty (PDF/Word/Excel/PowerPoint), pliki tekstowe/kod, archiwa ZIP."
-                : $"Nieobsługiwany typ pliku ({extension}). Obsługiwane: obrazy, dokumenty (PDF/Word/Excel/PowerPoint), pliki tekstowe/kod, archiwa ZIP.",
+                ? "Nieobsługiwany typ pliku (brak rozszerzenia). Obsługiwane: obrazy, dokumenty (PDF/Word/Excel/PowerPoint), pliki tekstowe/kod, archiwa ZIP, audio/wideo."
+                : $"Nieobsługiwany typ pliku ({extension}). Obsługiwane: obrazy, dokumenty (PDF/Word/Excel/PowerPoint), pliki tekstowe/kod, archiwa ZIP, audio/wideo.",
         };
     }
 
@@ -185,6 +207,51 @@ public sealed class FileProcessorTool : IJarvisTool
         }
     }
 
+    private async Task<string> ProcessMediaAsync(string filePath, string? question, CancellationToken ct)
+    {
+        float[] samples;
+        try
+        {
+            if (TooLargeMessage(filePath) is { } tooLarge)
+                return tooLarge;
+
+            samples = await Ffmpeg.DecodeToPcmAsync(_ffmpegPath, filePath, _sampleRate, ct);
+        }
+        catch (FfmpegException ex)
+        {
+            _logger.LogWarning(ex, "Nie udało się zdekodować audio z {Path}.", filePath);
+            return ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Błąd przetwarzania pliku audio/wideo {Path}.", filePath);
+            return "Nie udało się przetworzyć pliku audio/wideo.";
+        }
+
+        if (samples.Length == 0)
+            return "Plik nie zawiera ścieżki audio.";
+
+        string transcript;
+        try
+        {
+            transcript = await _stt.TranscribeAsync(samples, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Błąd transkrypcji {Path}.", filePath);
+            return "Nie udało się przetranskrybować nagrania.";
+        }
+
+        if (string.IsNullOrWhiteSpace(transcript))
+            return "Nie rozpoznano mowy w nagraniu.";
+
+        // Bez pytania: zwróć surową transkrypcję. Z pytaniem: przeanalizuj transkrypcję przez LLM.
+        if (string.IsNullOrWhiteSpace(question))
+            return $"Transkrypcja:\n{transcript}";
+
+        return await AnalyzeTextWithLlmAsync(transcript, question, "Nie rozpoznano mowy w nagraniu.", filePath, ct);
+    }
+
     /// <summary>Wyciąga tekst z dokumentu wg rozszerzenia (synchronicznie).</summary>
     private static string ExtractDocument(string filePath, string extension) => extension.ToLowerInvariant() switch
     {
@@ -226,6 +293,7 @@ public sealed class FileProcessorTool : IJarvisTool
         if (DocumentExtensions.Contains(extension)) return FileKind.Document;
         if (TextExtensions.Contains(extension)) return FileKind.Text;
         if (ArchiveExtensions.Contains(extension)) return FileKind.Archive;
+        if (MediaExtensions.Contains(extension)) return FileKind.Media;
         return FileKind.Unsupported;
     }
 
@@ -241,6 +309,7 @@ public sealed class FileProcessorTool : IJarvisTool
         Document,
         Text,
         Archive,
+        Media,
         Unsupported,
     }
 }
