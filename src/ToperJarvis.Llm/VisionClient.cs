@@ -64,7 +64,15 @@ public sealed class VisionClient : IVisionClient
             }
 
             var text = ParseContent(body);
-            return string.IsNullOrWhiteSpace(text) ? "Model wizji nie zwrócił opisu obrazu." : text;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                // Diagnostyka: 2xx, ale brak content (np. model rozumujący zużył budżet na myślenie
+                // przy włączonym thinkingu) — logujemy surową odpowiedź, by ułatwić rozpoznanie.
+                _logger.LogWarning("Model wizji nie zwrócił treści. Odpowiedź: {Body}", Truncate(body));
+                return "Model wizji nie zwrócił opisu obrazu.";
+            }
+
+            return text;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
