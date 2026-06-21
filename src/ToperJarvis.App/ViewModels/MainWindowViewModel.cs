@@ -1,11 +1,18 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Threading.Tasks;
+using Avalonia.Controls;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Options;
 using ToperJarvis.Abstractions;
+using ToperJarvis.Abstractions.Configuration;
 using ToperJarvis.Abstractions.Speech;
+using ToperJarvis.App.Controls;
 using ToperJarvis.App.Services;
 
 namespace ToperJarvis.App.ViewModels;
@@ -31,6 +38,19 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private double _lastTurnMs;
 
+    /// <summary>Odczyty telemetrii (HA, DGX) do HUD.</summary>
+    [ObservableProperty]
+    private IReadOnlyList<HudReadout> _telemetry = Array.Empty<HudReadout>();
+
+    /// <summary>Mini-podgląd z kamery (klatka JPEG zdekodowana do bitmapy).</summary>
+    [ObservableProperty]
+    private Bitmap? _cameraFrame;
+
+    private readonly HomeAssistantClient? _ha;
+    private readonly DgxClient? _dgx;
+    private readonly WebcamService? _webcam;
+    private readonly HomeAssistantOptions? _haOptions;
+
     public ObservableCollection<string> Transcript { get; } = new();
 
     /// <summary>Metryki systemu dla HUD (CPU/RAM).</summary>
@@ -39,10 +59,22 @@ public partial class MainWindowViewModel : ViewModelBase
     // Konstruktor projektowy (podgląd w IDE).
     public MainWindowViewModel() : this(new DesignOrchestrator(), new SystemMetricsService(), null) { }
 
-    public MainWindowViewModel(IAssistantOrchestrator orchestrator, SystemMetricsService metrics, IAudioCapture? capture)
+    public MainWindowViewModel(
+        IAssistantOrchestrator orchestrator,
+        SystemMetricsService metrics,
+        IAudioCapture? capture,
+        HomeAssistantClient? ha = null,
+        DgxClient? dgx = null,
+        WebcamService? webcam = null,
+        IOptions<JarvisOptions>? options = null)
     {
         _orchestrator = orchestrator;
         Metrics = metrics;
+        _ha = ha;
+        _dgx = dgx;
+        _webcam = webcam;
+        _haOptions = options?.Value.HomeAssistant;
+
         _orchestrator.StateChanged += (_, state) =>
             Dispatcher.UIThread.Post(() =>
             {
@@ -56,6 +88,65 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (capture is not null)
             capture.FrameAvailable += OnAudioFrame;
+
+        if (!Design.IsDesignMode)
+            StartTelemetry();
+    }
+
+    // Uruchamia źródła telemetrii i timery odświeżania (kamera szybko, dane wolniej).
+    private void StartTelemetry()
+    {
+        _webcam?.Start();
+        _dgx?.Start();
+
+        var cameraTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        cameraTimer.Tick += (_, _) => UpdateCamera();
+        cameraTimer.Start();
+
+        var pollSeconds = _haOptions?.PollSeconds is > 0 and var p ? p : 5;
+        var dataTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(pollSeconds) };
+        dataTimer.Tick += async (_, _) => await UpdateTelemetryAsync();
+        dataTimer.Start();
+        _ = UpdateTelemetryAsync(); // pierwszy odczyt od razu
+    }
+
+    private void UpdateCamera()
+    {
+        var jpeg = _webcam?.LatestJpeg;
+        if (jpeg is null)
+            return;
+
+        try
+        {
+            using var ms = new MemoryStream(jpeg);
+            var bmp = new Bitmap(ms);
+            var old = CameraFrame;
+            CameraFrame = bmp;
+            old?.Dispose();
+        }
+        catch { /* uszkodzona klatka — pomijamy */ }
+    }
+
+    private async Task UpdateTelemetryAsync()
+    {
+        var list = new List<HudReadout>();
+
+        if (_ha is { Enabled: true } && _haOptions is not null)
+        {
+            foreach (var s in _haOptions.Sensors)
+            {
+                var state = await _ha.GetStateAsync(s.EntityId);
+                list.Add(new HudReadout(s.Label, state is null ? "—" : $"{state}{s.Unit}", s.Right));
+            }
+        }
+
+        if (_dgx is not null)
+        {
+            list.Add(new HudReadout("GPU AI", _dgx.GpuUtil is { } u ? $"{u:0}%" : "—", true));
+            list.Add(new HudReadout("MOC AI", _dgx.PowerW is { } w ? $"{w:0} W" : "—", true));
+        }
+
+        Telemetry = list;
     }
 
     // Liczy szczyt ramki i aktualizuje wskaźnik z płynnym opadaniem (event leci z wątku audio).

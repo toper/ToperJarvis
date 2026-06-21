@@ -17,6 +17,70 @@ public sealed class JarvisOptions
     public BrowserOptions Browser { get; set; } = new();
     public MediaOptions Media { get; set; } = new();
     public PushToTalkOptions PushToTalk { get; set; } = new();
+    public HomeAssistantOptions HomeAssistant { get; set; } = new();
+    public CameraOptions Camera { get; set; } = new();
+    public DgxOptions Dgx { get; set; } = new();
+}
+
+/// <summary>Monitoring serwera DGX (GPU util/moc/temperatura) przez SSH + nvidia-smi.</summary>
+public sealed class DgxOptions
+{
+    /// <summary>Czy monitorować DGX.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Host SSH (np. 192.168.7.30). Pusty = wyłączone.</summary>
+    public string Host { get; set; } = "";
+
+    /// <summary>Użytkownik SSH (uwierzytelnianie kluczem z domyślnego ~/.ssh).</summary>
+    public string User { get; set; } = "";
+
+    /// <summary>Co ile sekund odświeżać metryki (nvidia-smi -l).</summary>
+    public int PollSeconds { get; set; } = 5;
+}
+
+/// <summary>Mini-podgląd z lokalnej kamery (WebCam) w HUD.</summary>
+public sealed class CameraOptions
+{
+    /// <summary>Czy pokazywać podgląd kamery.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Indeks urządzenia kamery (0 = domyślna).</summary>
+    public int DeviceIndex { get; set; }
+
+    /// <summary>Liczba klatek na sekundę mini-podglądu (oszczędnie — to tylko miniatura).</summary>
+    public int Fps { get; set; } = 8;
+}
+
+/// <summary>Integracja z Home Assistant (telemetria w HUD: temperatury, kamera).</summary>
+public sealed class HomeAssistantOptions
+{
+    /// <summary>Adres bazowy HA, np. http://192.168.7.10:8123. Pusty = integracja wyłączona.</summary>
+    public string BaseUrl { get; set; } = "";
+
+    /// <summary>Long-lived access token (trzymać w appsettings.Local.json — poza repo).</summary>
+    public string Token { get; set; } = "";
+
+    /// <summary>Co ile sekund odświeżać dane.</summary>
+    public int PollSeconds { get; set; } = 5;
+
+    /// <summary>Encja kamery (np. camera.salon_kamera_profile001_substream). Pusta = brak podglądu.</summary>
+    public string CameraEntityId { get; set; } = "";
+
+    /// <summary>Sensory do pokazania w HUD (etykieta + entity_id + strona).</summary>
+    public List<HomeAssistantSensor> Sensors { get; set; } = new();
+}
+
+/// <summary>Pojedynczy sensor HA prezentowany w HUD.</summary>
+public sealed class HomeAssistantSensor
+{
+    public string Label { get; set; } = "";
+    public string EntityId { get; set; } = "";
+
+    /// <summary>Jednostka dopisywana do wartości (np. "°C", "%"). Pusta = bez jednostki.</summary>
+    public string Unit { get; set; } = "";
+
+    /// <summary>Czy panel ma być po prawej stronie orba (domyślnie lewa).</summary>
+    public bool Right { get; set; }
 }
 
 /// <summary>Globalny skrót „push-to-talk" (hold-to-talk) — alternatywa dla słowa-klucza.</summary>

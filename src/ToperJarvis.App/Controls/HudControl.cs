@@ -11,6 +11,9 @@ using ToperJarvis.Abstractions;
 
 namespace ToperJarvis.App.Controls;
 
+/// <summary>Pojedynczy odczyt telemetrii w HUD (etykieta + wartość + strona orba).</summary>
+public readonly record struct HudReadout(string Label, string Value, bool Right);
+
 /// <summary>
 /// HUD J.A.R.V.I.S. rysowany przez SkiaSharp: szklisty centralny orb (puls idle, jaśnienie i
 /// zmiana barwy zależnie od stanu, fale energii przy przetwarzaniu), trzy koncentryczne pierścienie
@@ -32,6 +35,9 @@ public sealed class HudControl : Control
 
     public static readonly StyledProperty<double> LastTurnMsProperty =
         AvaloniaProperty.Register<HudControl, double>(nameof(LastTurnMs));
+
+    public static readonly StyledProperty<System.Collections.Generic.IReadOnlyList<HudReadout>?> TelemetryProperty =
+        AvaloniaProperty.Register<HudControl, System.Collections.Generic.IReadOnlyList<HudReadout>?>(nameof(Telemetry));
 
     private readonly DispatcherTimer _timer;
     private double _seconds;
@@ -56,6 +62,13 @@ public sealed class HudControl : Control
     /// <summary>Czas przetwarzania ostatniej komendy (ms) — pokazywany w telemetrii HUD.</summary>
     public double LastTurnMs { get => GetValue(LastTurnMsProperty); set => SetValue(LastTurnMsProperty, value); }
 
+    /// <summary>Odczyty telemetrii (HA, DGX) prezentowane wokół orba.</summary>
+    public System.Collections.Generic.IReadOnlyList<HudReadout>? Telemetry
+    {
+        get => GetValue(TelemetryProperty);
+        set => SetValue(TelemetryProperty, value);
+    }
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -71,13 +84,14 @@ public sealed class HudControl : Control
     public override void Render(DrawingContext context)
     {
         context.Custom(new HudDrawOperation(
-            new Rect(Bounds.Size), _seconds, State, Cpu, Ram, MicLevel, LastTurnMs, DateTime.Now));
+            new Rect(Bounds.Size), _seconds, State, Cpu, Ram, MicLevel, LastTurnMs, DateTime.Now,
+            Telemetry ?? System.Array.Empty<HudReadout>()));
     }
 
     /// <summary>Operacja rysująca HUD bezpośrednio na płótnie SkiaSharp.</summary>
     private sealed class HudDrawOperation(
         Rect bounds, double seconds, AssistantState state, double cpu, double ram, double micLevel,
-        double lastTurnMs, DateTime now)
+        double lastTurnMs, DateTime now, System.Collections.Generic.IReadOnlyList<HudReadout> telemetry)
         : ICustomDrawOperation
     {
         // Paleta cyan → fiolet (stany aktywne) zgodna ze stylem J.A.R.V.I.S.
@@ -188,17 +202,31 @@ public sealed class HudControl : Control
             canvas.DrawText(now.ToString("dddd, dd.MM.yyyy"), x + 2, y + 46, SKTextAlign.Left, dateFont, datePaint);
         }
 
-        // Panele telemetrii wokół orba. Wartości realne (PROC) + miejsca na integracje (—).
+        // Panele telemetrii wokół orba: PRZETWARZANIE (realne) + odczyty z listy (HA, DGX).
         private void DrawTelemetry(SKCanvas canvas, float w, float h, SKColor color)
         {
-            var proc = lastTurnMs > 0 ? $"{lastTurnMs:0} ms" : "—";
-            DrawReadout(canvas, 8, h * 0.32f, "PRZETWARZANIE", proc, color);
-            DrawReadout(canvas, 8, h * 0.32f + 44, "GABINET", "—", color);
-            DrawReadout(canvas, 8, h * 0.32f + 88, "QNAP", "—", color);
+            const float spacing = 44f;
+            var topY = h * 0.30f;
 
-            DrawReadoutRight(canvas, w - 8, h * 0.32f, "HOME ASSISTANT", "—", color);
-            DrawReadoutRight(canvas, w - 8, h * 0.32f + 44, "SERWER AI", "—", color);
-            DrawReadoutRight(canvas, w - 8, h * 0.32f + 88, "KAMERA", "—", color);
+            // Lewa kolumna zaczyna się od czasu przetwarzania.
+            var leftY = topY;
+            DrawReadout(canvas, 8, leftY, "PRZETWARZANIE", lastTurnMs > 0 ? $"{lastTurnMs:0} ms" : "—", color);
+            leftY += spacing;
+
+            var rightY = topY;
+            foreach (var r in telemetry)
+            {
+                if (r.Right)
+                {
+                    DrawReadoutRight(canvas, w - 8, rightY, r.Label, r.Value, color);
+                    rightY += spacing;
+                }
+                else
+                {
+                    DrawReadout(canvas, 8, leftY, r.Label, r.Value, color);
+                    leftY += spacing;
+                }
+            }
         }
 
         private void DrawReadout(SKCanvas canvas, float x, float y, string label, string value, SKColor color)
