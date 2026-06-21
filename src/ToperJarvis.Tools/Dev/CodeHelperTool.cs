@@ -2,14 +2,16 @@ using System.ComponentModel;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using ToperJarvis.Abstractions.Tools;
+using ToperJarvis.Abstractions.Vision;
 
 namespace ToperJarvis.Tools.Dev;
 
 /// <summary>
-/// Narzędzie <c>code_helper</c> — generuje, edytuje, objaśnia, uruchamia, optymalizuje i „buduje"
-/// (iteracyjny zapis→uruchom→popraw) kod w jednym pliku, korzystając z LLM. Port jednoplikowej
-/// części <c>_Old/actions/code_helper.py</c>. Akcja <c>screen_debug</c> (wizja) oraz generator
-/// wieloplikowy <c>dev_agent</c> — w osobnym kroku. UWAGA: akcje run/build wykonują wygenerowany kod.
+/// Narzędzie <c>code_helper</c> — generuje, edytuje, objaśnia, uruchamia, optymalizuje, „buduje"
+/// (iteracyjny zapis→uruchom→popraw) oraz debuguje z ekranu (<c>screen_debug</c>: zrzut ekranu +
+/// model wizji) kod w jednym pliku, korzystając z LLM. Port jednoplikowej części
+/// <c>_Old/actions/code_helper.py</c>. Generator wieloplikowy to osobne narzędzie <c>dev_agent</c>.
+/// UWAGA: akcje run/build wykonują wygenerowany kod.
 /// </summary>
 public sealed class CodeHelperTool : IJarvisTool
 {
@@ -42,11 +44,16 @@ public sealed class CodeHelperTool : IJarvisTool
         };
 
     private readonly IChatClient _chat;
+    private readonly IScreenCapture _screen;
+    private readonly IVisionClient _vision;
     private readonly ILogger<CodeHelperTool> _logger;
 
-    public CodeHelperTool(IChatClient chat, ILogger<CodeHelperTool> logger)
+    public CodeHelperTool(
+        IChatClient chat, IScreenCapture screen, IVisionClient vision, ILogger<CodeHelperTool> logger)
     {
         _chat = chat;
+        _screen = screen;
+        _vision = vision;
         _logger = logger;
     }
 
@@ -55,12 +62,13 @@ public sealed class CodeHelperTool : IJarvisTool
     public AIFunction AsAIFunction() =>
         AIFunctionFactory.Create(ExecuteAsync, Name,
             "Pomaga z kodem: write (generuj), edit (zmień plik), explain (wyjaśnij), run (uruchom), " +
-            "optimize (optymalizuj), build (generuj→uruchom→popraw iteracyjnie), auto (wykryj zamiar). " +
+            "optimize (optymalizuj), build (generuj→uruchom→popraw iteracyjnie), " +
+            "screen_debug (przeanalizuj błąd widoczny na ekranie), auto (wykryj zamiar). " +
             "UWAGA: run/build wykonują kod.");
 
-    [Description("Generuje/edytuje/uruchamia/optymalizuje kod.")]
+    [Description("Generuje/edytuje/uruchamia/optymalizuje/debuguje kod.")]
     private Task<string> ExecuteAsync(
-        [Description("Akcja: auto, write, edit, explain, run, optimize, build.")] string action,
+        [Description("Akcja: auto, write, edit, explain, run, optimize, build, screen_debug.")] string action,
         [Description("Opis zadania / co napisać lub zbudować.")] string? description = null,
         [Description("Ścieżka pliku (dla edit/explain/run/optimize).")] string? filePath = null,
         [Description("Kod źródłowy (dla explain/optimize, gdy bez pliku).")] string? code = null,
@@ -82,6 +90,7 @@ public sealed class CodeHelperTool : IJarvisTool
             "run" => RunActionAsync(filePath, timeout, cancellationToken),
             "optimize" => OptimizeActionAsync(filePath, code, language, outputPath, cancellationToken),
             "build" => BuildActionAsync(description, language, outputPath, timeout, cancellationToken),
+            "screen_debug" => ScreenDebugActionAsync(description, filePath, cancellationToken),
             _ => Task.FromResult($"Nieobsługiwana akcja: {resolved}."),
         };
     }
@@ -240,6 +249,42 @@ public sealed class CodeHelperTool : IJarvisTool
                $"Ostatni błąd: {Truncate(lastOutput, 200)}\n\nOstatni kod zapisany: {path}";
     }
 
+    private async Task<string> ScreenDebugActionAsync(string? description, string? filePath, CancellationToken ct)
+    {
+        VisionImage screenshot;
+        try
+        {
+            screenshot = _screen.Capture();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nie udało się wykonać zrzutu ekranu do debugowania.");
+            return "Nie udało się wykonać zrzutu ekranu.";
+        }
+
+        var context = "";
+        if (!string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
+        {
+            var content = await ResolveCodeAsync(filePath, null, ct);
+            if (!string.IsNullOrWhiteSpace(content))
+                context = $"\n\nPowiązany plik ({filePath}):\n{Truncate(content, 4000)}";
+        }
+
+        return await _vision.DescribeAsync(BuildScreenDebugPrompt(description, context), screenshot, ct);
+    }
+
+    /// <summary>Buduje polecenie debugowania dla modelu wizji: pytanie użytkownika + opcjonalny kontekst pliku.</summary>
+    internal static string BuildScreenDebugPrompt(string? description, string context)
+    {
+        var question = string.IsNullOrWhiteSpace(description)
+            ? "Jaki błąd lub problem widać na ekranie i jak go naprawić?"
+            : description.Trim();
+
+        return "Jesteś ekspertem programistą/debuggerem analizującym zrzut ekranu. " +
+               $"Pytanie użytkownika: {question}{context}\n\n" +
+               "Zidentyfikuj błędy, wyjaśnij przyczynę i podaj poprawkę. Jeśli widać kod, pokaż poprawioną wersję.";
+    }
+
     private async Task<(string Code, string Path)> GenerateAndSaveAsync(string description, string language, string? outputPath, CancellationToken ct)
     {
         var lang = NormalizeLanguage(language);
@@ -346,6 +391,13 @@ public sealed class CodeHelperTool : IJarvisTool
     {
         var desc = (description ?? "").ToLowerInvariant();
         bool Has(params string[] kws) => kws.Any(k => desc.Contains(k, StringComparison.Ordinal));
+
+        // Debug z ekranu — gdy użytkownik PYTA o to, co widać na ekranie, a nie prosi o napisanie kodu
+        // (np. „napisz skrypt do screenshotów" to write, nie screen_debug).
+        var wantsNewCode = Has("napisz", "stwórz", "wygeneruj", "skrypt", "program", "write", "create", "generate");
+        if (!wantsNewCode &&
+            Has("na ekranie", "zrzut ekranu", "z ekranu", "screenshot", "screen_debug", "on screen", "on the screen"))
+            return "screen_debug";
 
         if (Has("optimize", "refactor", "clean up", "improve", "make it better", "optymalizuj", "ulepsz", "uprość") &&
             (!string.IsNullOrEmpty(code) || !string.IsNullOrEmpty(filePath)))
