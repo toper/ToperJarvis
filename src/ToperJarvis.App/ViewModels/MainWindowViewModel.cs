@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
@@ -118,12 +119,16 @@ public partial class MainWindowViewModel : ViewModelBase
         _ = UpdateTelemetryAsync(); // pierwszy odczyt od razu
     }
 
+    private byte[]? _lastJpeg;
+
     private void UpdateCamera()
     {
         var jpeg = _webcam?.LatestJpeg;
-        if (jpeg is null)
+        // Pomiń dekodowanie, gdy producent nie wystawił nowej klatki (ta sama referencja bufora).
+        if (jpeg is null || ReferenceEquals(jpeg, _lastJpeg))
             return;
 
+        _lastJpeg = jpeg;
         try
         {
             using var ms = new MemoryStream(jpeg);
@@ -140,11 +145,11 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (_ha is { Enabled: true } && _haOptions is not null)
         {
-            foreach (var s in _haOptions.Sensors)
-            {
-                var state = await _ha.GetStateAsync(s.EntityId);
-                list.Add(new HudReadout(s.Label, state is null ? "—" : $"{state}{s.Unit}", s.Right));
-            }
+            // Niezależne zapytania — równolegle (czas ≈ 1×RTT zamiast N×RTT).
+            var sensors = _haOptions.Sensors;
+            var states = await Task.WhenAll(sensors.Select(s => _ha.GetStateAsync(s.EntityId)));
+            for (var i = 0; i < sensors.Count; i++)
+                list.Add(new HudReadout(sensors[i].Label, states[i] is { } v ? $"{v}{sensors[i].Unit}" : "—", sensors[i].Right));
         }
 
         if (_dgx is not null)

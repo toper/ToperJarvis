@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -35,8 +36,7 @@ public partial class App : Application
             desktop.MainWindow = _mainWindow;
 
             // Podmenu wyboru urządzeń audio w trayu (mikrofon + wyjście).
-            BuildMicrophoneMenu();
-            BuildOutputMenu();
+            BuildAudioMenus();
 
             // Start pętli głosowej (przechwytywanie audio + nasłuch słowa-klucza).
             var orchestrator = Program.Services.GetRequiredService<IAssistantOrchestrator>();
@@ -77,66 +77,82 @@ public partial class App : Application
             desktop.Shutdown();
     }
 
-    /// <summary>Wstawia do menu traya podmenu „Mikrofon" z listą urządzeń wejściowych.</summary>
-    private void BuildMicrophoneMenu()
+    /// <summary>Buduje podmenu wyboru mikrofonu i wyjścia audio w trayu.</summary>
+    private void BuildAudioMenus()
     {
         var tray = TrayIcon.GetIcons(this)?.FirstOrDefault();
         if (tray?.Menu is not { } menu)
             return;
 
-        _microphoneMenu = new NativeMenu();
-        var micItem = new NativeMenuItem { Header = "Mikrofon", Menu = _microphoneMenu };
+        _microphoneMenu = InsertSubmenu(menu, "Mikrofon");
+        _outputMenu = InsertSubmenu(menu, "Głośnik (wyjście)");
+        RefreshMicrophoneMenu();
+        RefreshOutputMenu();
+    }
 
-        // Wstaw nad separatorem przed pozycją „Wyjście"; gdy brak — na koniec.
+    // Wstawia puste podmenu nad separatorem przed „Wyjście" (lub na koniec).
+    private static NativeMenu InsertSubmenu(NativeMenu menu, string header)
+    {
+        var sub = new NativeMenu();
         var separatorIndex = menu.Items.ToList().FindIndex(i => i is NativeMenuItemSeparator);
         if (separatorIndex < 0)
             separatorIndex = menu.Items.Count;
-        menu.Items.Insert(separatorIndex, micItem);
-
-        RefreshMicrophoneMenu();
+        menu.Items.Insert(separatorIndex, new NativeMenuItem { Header = header, Menu = sub });
+        return sub;
     }
 
-    /// <summary>Odbudowuje pozycje podmenu z aktualną listą urządzeń i zaznaczeniem wyboru.</summary>
     private void RefreshMicrophoneMenu()
     {
-        if (_microphoneMenu is null)
+        var capture = Program.Services.GetRequiredService<IAudioCapture>();
+        PopulateDeviceMenu(_microphoneMenu, "Domyślny (systemowy)", capture.SelectedDeviceName,
+            capture.GetInputDevices().Select(d => d.Name), OnMicrophoneSelected);
+    }
+
+    private void RefreshOutputMenu()
+    {
+        var output = Program.Services.GetRequiredService<IAudioOutput>();
+        PopulateDeviceMenu(_outputMenu, "Domyślne (systemowe)", output.SelectedDeviceName,
+            output.GetOutputDevices().Select(d => d.Name), OnOutputSelected);
+    }
+
+    // Wypełnia podmenu pozycją „domyślny" + listą urządzeń (radio), z zaznaczeniem aktualnego wyboru.
+    private static void PopulateDeviceMenu(
+        NativeMenu? sub, string defaultHeader, string? selected, IEnumerable<string> devices, Action<string> onSelect)
+    {
+        if (sub is null)
             return;
 
-        var capture = Program.Services.GetRequiredService<IAudioCapture>();
-        var selected = capture.SelectedDeviceName;
-        _microphoneMenu.Items.Clear();
-
+        sub.Items.Clear();
         var defaultItem = new NativeMenuItem
         {
-            Header = "Domyślny (systemowy)",
+            Header = defaultHeader,
             ToggleType = MenuItemToggleType.Radio,
             IsChecked = selected is null,
         };
-        defaultItem.Click += (_, _) => OnMicrophoneSelected("");
-        _microphoneMenu.Items.Add(defaultItem);
+        defaultItem.Click += (_, _) => onSelect("");
+        sub.Items.Add(defaultItem);
 
-        var devices = capture.GetInputDevices();
-        if (devices.Count == 0)
+        var names = devices.ToList();
+        if (names.Count == 0)
         {
-            _microphoneMenu.Items.Add(new NativeMenuItem { Header = "(brak urządzeń)", IsEnabled = false });
+            sub.Items.Add(new NativeMenuItem { Header = "(brak urządzeń)", IsEnabled = false });
             return;
         }
 
-        _microphoneMenu.Items.Add(new NativeMenuItemSeparator());
-        foreach (var device in devices)
+        sub.Items.Add(new NativeMenuItemSeparator());
+        foreach (var name in names)
         {
             var item = new NativeMenuItem
             {
-                Header = device.Name,
+                Header = name,
                 ToggleType = MenuItemToggleType.Radio,
-                IsChecked = string.Equals(device.Name, selected, StringComparison.OrdinalIgnoreCase),
+                IsChecked = string.Equals(name, selected, StringComparison.OrdinalIgnoreCase),
             };
-            item.Click += (_, _) => OnMicrophoneSelected(device.Name);
-            _microphoneMenu.Items.Add(item);
+            item.Click += (_, _) => onSelect(name);
+            sub.Items.Add(item);
         }
     }
 
-    /// <summary>Przełącza mikrofon w locie i zapisuje wybór do appsettings.Local.json.</summary>
     private void OnMicrophoneSelected(string deviceName)
     {
         Program.Services.GetRequiredService<IAudioCapture>().SelectDevice(deviceName);
@@ -145,65 +161,6 @@ public partial class App : Application
         RefreshMicrophoneMenu();
     }
 
-    /// <summary>Wstawia do menu traya podmenu „Głośnik" z listą urządzeń wyjściowych.</summary>
-    private void BuildOutputMenu()
-    {
-        var tray = TrayIcon.GetIcons(this)?.FirstOrDefault();
-        if (tray?.Menu is not { } menu)
-            return;
-
-        _outputMenu = new NativeMenu();
-        var outItem = new NativeMenuItem { Header = "Głośnik (wyjście)", Menu = _outputMenu };
-
-        var separatorIndex = menu.Items.ToList().FindIndex(i => i is NativeMenuItemSeparator);
-        if (separatorIndex < 0)
-            separatorIndex = menu.Items.Count;
-        menu.Items.Insert(separatorIndex, outItem);
-
-        RefreshOutputMenu();
-    }
-
-    /// <summary>Odbudowuje pozycje podmenu wyjścia z aktualną listą urządzeń i zaznaczeniem.</summary>
-    private void RefreshOutputMenu()
-    {
-        if (_outputMenu is null)
-            return;
-
-        var output = Program.Services.GetRequiredService<IAudioOutput>();
-        var selected = output.SelectedDeviceName;
-        _outputMenu.Items.Clear();
-
-        var defaultItem = new NativeMenuItem
-        {
-            Header = "Domyślne (systemowe)",
-            ToggleType = MenuItemToggleType.Radio,
-            IsChecked = selected is null,
-        };
-        defaultItem.Click += (_, _) => OnOutputSelected("");
-        _outputMenu.Items.Add(defaultItem);
-
-        var devices = output.GetOutputDevices();
-        if (devices.Count == 0)
-        {
-            _outputMenu.Items.Add(new NativeMenuItem { Header = "(brak urządzeń)", IsEnabled = false });
-            return;
-        }
-
-        _outputMenu.Items.Add(new NativeMenuItemSeparator());
-        foreach (var device in devices)
-        {
-            var item = new NativeMenuItem
-            {
-                Header = device.Name,
-                ToggleType = MenuItemToggleType.Radio,
-                IsChecked = string.Equals(device.Name, selected, StringComparison.OrdinalIgnoreCase),
-            };
-            item.Click += (_, _) => OnOutputSelected(device.Name);
-            _outputMenu.Items.Add(item);
-        }
-    }
-
-    /// <summary>Ustawia wyjście audio i zapisuje wybór do appsettings.Local.json.</summary>
     private void OnOutputSelected(string deviceName)
     {
         Program.Services.GetRequiredService<IAudioOutput>().SelectDevice(deviceName);

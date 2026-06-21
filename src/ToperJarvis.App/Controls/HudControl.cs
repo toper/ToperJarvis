@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -42,8 +43,8 @@ public sealed class HudControl : Control
     public static readonly StyledProperty<double> LastTurnMsProperty =
         AvaloniaProperty.Register<HudControl, double>(nameof(LastTurnMs));
 
-    public static readonly StyledProperty<System.Collections.Generic.IReadOnlyList<HudReadout>?> TelemetryProperty =
-        AvaloniaProperty.Register<HudControl, System.Collections.Generic.IReadOnlyList<HudReadout>?>(nameof(Telemetry));
+    public static readonly StyledProperty<IReadOnlyList<HudReadout>?> TelemetryProperty =
+        AvaloniaProperty.Register<HudControl, IReadOnlyList<HudReadout>?>(nameof(Telemetry));
 
     private readonly DispatcherTimer _timer;
     private double _seconds;
@@ -75,7 +76,7 @@ public sealed class HudControl : Control
     public double LastTurnMs { get => GetValue(LastTurnMsProperty); set => SetValue(LastTurnMsProperty, value); }
 
     /// <summary>Odczyty telemetrii (HA, DGX) prezentowane wokół orba.</summary>
-    public System.Collections.Generic.IReadOnlyList<HudReadout>? Telemetry
+    public IReadOnlyList<HudReadout>? Telemetry
     {
         get => GetValue(TelemetryProperty);
         set => SetValue(TelemetryProperty, value);
@@ -97,14 +98,14 @@ public sealed class HudControl : Control
     {
         context.Custom(new HudDrawOperation(
             new Rect(Bounds.Size), _seconds, State, Cpu, Ram, GpuUtil, PowerW, MicLevel, LastTurnMs, DateTime.Now,
-            Telemetry ?? System.Array.Empty<HudReadout>()));
+            Telemetry ?? Array.Empty<HudReadout>()));
     }
 
     /// <summary>Operacja rysująca HUD bezpośrednio na płótnie SkiaSharp.</summary>
     private sealed class HudDrawOperation(
         Rect bounds, double seconds, AssistantState state, double cpu, double ram, double gpuUtil, double powerW,
         double micLevel, double lastTurnMs, DateTime now,
-        System.Collections.Generic.IReadOnlyList<HudReadout> telemetry)
+        IReadOnlyList<HudReadout> telemetry)
         : ICustomDrawOperation
     {
         // Paleta cyan → fiolet (stany aktywne) zgodna ze stylem J.A.R.V.I.S.
@@ -114,6 +115,16 @@ public sealed class HudControl : Control
         // Futurystyczna czcionka (Bahnschrift — dostarczana z Windows 10/11), z fallbackiem.
         private static readonly SKTypeface Futuristic =
             SKTypeface.FromFamilyName("Bahnschrift") ?? SKTypeface.Default;
+
+        // Stałe (niezależne od klatki) — alokowane raz, nie ~30×/s. Fonty o stałym rozmiarze i
+        // kosztowne filtry rozmycia (CreateBlur) buforowane statycznie.
+        private static readonly SKFont ReadoutLabelFont = new(Futuristic, 11);
+        private static readonly SKFont ReadoutValueFont = new(Futuristic, 17);
+        private static readonly SKFont ClockTimeFont = new(Futuristic, 30);
+        private static readonly SKFont ClockDateFont = new(Futuristic, 14);
+        private static readonly SKMaskFilter BlurCoreGlow = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 30);
+        private static readonly SKMaskFilter BlurCoreDot = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 8);
+        private static readonly SKMaskFilter BlurStateGlow = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 6);
 
         public Rect Bounds => bounds;
         public bool HitTest(Point p) => false;
@@ -209,13 +220,11 @@ public sealed class HudControl : Control
 
         private void DrawClock(SKCanvas canvas, float x, float y)
         {
-            using var timeFont = new SKFont(Futuristic, 30);
             using var timePaint = new SKPaint { Color = BrightCyan.WithAlpha(230), IsAntialias = true };
-            canvas.DrawText(now.ToString("HH:mm:ss"), x, y + 26, SKTextAlign.Left, timeFont, timePaint);
+            canvas.DrawText(now.ToString("HH:mm:ss"), x, y + 26, SKTextAlign.Left, ClockTimeFont, timePaint);
 
-            using var dateFont = new SKFont(Futuristic, 14);
             using var datePaint = new SKPaint { Color = Cyan.WithAlpha(170), IsAntialias = true };
-            canvas.DrawText(now.ToString("dddd, dd.MM.yyyy"), x + 2, y + 46, SKTextAlign.Left, dateFont, datePaint);
+            canvas.DrawText(now.ToString("dddd, dd.MM.yyyy"), x + 2, y + 46, SKTextAlign.Left, ClockDateFont, datePaint);
         }
 
         // Panele telemetrii wokół orba: PRZETWARZANIE (realne) + odczyty z listy (HA, DGX).
@@ -232,14 +241,14 @@ public sealed class HudControl : Control
             leftY += spacing;
 
             var rightY = topY;
-            DrawReadoutRight(canvas, w - 8, rightY, "RAM", $"{ram:0}%", color);
+            DrawReadout(canvas, w - 8, rightY, "RAM", $"{ram:0}%", color, right: true);
             rightY += spacing;
 
             foreach (var r in telemetry)
             {
                 if (r.Right)
                 {
-                    DrawReadoutRight(canvas, w - 8, rightY, r.Label, r.Value, color);
+                    DrawReadout(canvas, w - 8, rightY, r.Label, r.Value, color, right: true);
                     rightY += spacing;
                 }
                 else
@@ -250,31 +259,19 @@ public sealed class HudControl : Control
             }
         }
 
-        private void DrawReadout(SKCanvas canvas, float x, float y, string label, string value, SKColor color)
+        // Jeden odczyt telemetrii; right = wyrównanie do prawej (pasek i tekst po drugiej stronie).
+        private void DrawReadout(SKCanvas canvas, float x, float y, string label, string value, SKColor color, bool right = false)
         {
-            // Subtelne pulsowanie ramki.
-            var a = (byte)(80 + 60 * (0.5 + 0.5 * Math.Sin(seconds * 2 + x + y)));
-            using (var bar = new SKPaint { Color = color.WithAlpha(a), IsAntialias = true })
-                canvas.DrawRect(x, y, 3, 30, bar);
-            using (var lFont = new SKFont(Futuristic, 11))
-            using (var lPaint = new SKPaint { Color = color.WithAlpha(150), IsAntialias = true })
-                canvas.DrawText(label, x + 10, y + 12, SKTextAlign.Left, lFont, lPaint);
-            using (var vFont = new SKFont(Futuristic, 17))
-            using (var vPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true })
-                canvas.DrawText(value, x + 10, y + 30, SKTextAlign.Left, vFont, vPaint);
-        }
+            var a = (byte)(80 + 60 * (0.5 + 0.5 * Math.Sin(seconds * 2 + x + y))); // subtelne pulsowanie
+            var align = right ? SKTextAlign.Right : SKTextAlign.Left;
+            var textX = right ? x - 10 : x + 10;
 
-        private void DrawReadoutRight(SKCanvas canvas, float x, float y, string label, string value, SKColor color)
-        {
-            var a = (byte)(80 + 60 * (0.5 + 0.5 * Math.Sin(seconds * 2 + x + y)));
             using (var bar = new SKPaint { Color = color.WithAlpha(a), IsAntialias = true })
-                canvas.DrawRect(x - 3, y, 3, 30, bar);
-            using (var lFont = new SKFont(Futuristic, 11))
+                canvas.DrawRect(right ? x - 3 : x, y, 3, 30, bar);
             using (var lPaint = new SKPaint { Color = color.WithAlpha(150), IsAntialias = true })
-                canvas.DrawText(label, x - 10, y + 12, SKTextAlign.Right, lFont, lPaint);
-            using (var vFont = new SKFont(Futuristic, 17))
+                canvas.DrawText(label, textX, y + 12, align, ReadoutLabelFont, lPaint);
             using (var vPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true })
-                canvas.DrawText(value, x - 10, y + 30, SKTextAlign.Right, vFont, vPaint);
+                canvas.DrawText(value, textX, y + 30, align, ReadoutValueFont, vPaint);
         }
 
         private void DrawRipples(SKCanvas canvas, float cx, float cy, float maxR, SKColor color, float intensity)
@@ -345,7 +342,7 @@ public sealed class HudControl : Control
             {
                 Color = color.WithAlpha((byte)(60 + level * 130)),
                 IsAntialias = true,
-                MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 30),
+                MaskFilter = BlurCoreGlow,
             })
             {
                 canvas.DrawCircle(cx, cy, coreR * 1.05f, glow);
@@ -378,7 +375,7 @@ public sealed class HudControl : Control
             {
                 Color = SKColors.White.WithAlpha((byte)(130 + level * 125)),
                 IsAntialias = true,
-                MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 8),
+                MaskFilter = BlurCoreDot,
             })
             {
                 canvas.DrawCircle(cx, cy, coreR * 0.32f, dot);
@@ -398,7 +395,7 @@ public sealed class HudControl : Control
             {
                 Color = color.WithAlpha((byte)(120 + level * 100)),
                 IsAntialias = true,
-                MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 6),
+                MaskFilter = BlurStateGlow,
             };
             using var statePaint = new SKPaint
             {
