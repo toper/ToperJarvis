@@ -30,6 +30,9 @@ public sealed class HudControl : Control
     public static readonly StyledProperty<double> MicLevelProperty =
         AvaloniaProperty.Register<HudControl, double>(nameof(MicLevel));
 
+    public static readonly StyledProperty<double> LastTurnMsProperty =
+        AvaloniaProperty.Register<HudControl, double>(nameof(LastTurnMs));
+
     private readonly DispatcherTimer _timer;
     private double _seconds;
 
@@ -50,6 +53,9 @@ public sealed class HudControl : Control
     /// <summary>Poziom sygnału mikrofonu (0..1) — napędza waveform i jasność orba.</summary>
     public double MicLevel { get => GetValue(MicLevelProperty); set => SetValue(MicLevelProperty, value); }
 
+    /// <summary>Czas przetwarzania ostatniej komendy (ms) — pokazywany w telemetrii HUD.</summary>
+    public double LastTurnMs { get => GetValue(LastTurnMsProperty); set => SetValue(LastTurnMsProperty, value); }
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
@@ -65,12 +71,13 @@ public sealed class HudControl : Control
     public override void Render(DrawingContext context)
     {
         context.Custom(new HudDrawOperation(
-            new Rect(Bounds.Size), _seconds, State, Cpu, Ram, MicLevel));
+            new Rect(Bounds.Size), _seconds, State, Cpu, Ram, MicLevel, LastTurnMs, DateTime.Now));
     }
 
     /// <summary>Operacja rysująca HUD bezpośrednio na płótnie SkiaSharp.</summary>
     private sealed class HudDrawOperation(
-        Rect bounds, double seconds, AssistantState state, double cpu, double ram, double micLevel)
+        Rect bounds, double seconds, AssistantState state, double cpu, double ram, double micLevel,
+        double lastTurnMs, DateTime now)
         : ICustomDrawOperation
     {
         // Paleta cyan → fiolet (stany aktywne) zgodna ze stylem J.A.R.V.I.S.
@@ -125,11 +132,100 @@ public sealed class HudControl : Control
                 DrawCore(canvas, cx, cy, maxR * 0.46f, color, idlePulse, level);
                 DrawCenterText(canvas, cx, cy, maxR, color, level, state);
 
-                // Futurystyczne wskaźniki systemu po bokach orba.
+                // Futurystyczne wskaźniki systemu po bokach orba + linie danych płynące do orba.
                 var gr = Math.Min(w, h) * 0.12f;
-                DrawGauge(canvas, gr * 1.4f, h - gr * 1.35f, gr, cpu, "CPU");
-                DrawGauge(canvas, w - gr * 1.4f, h - gr * 1.35f, gr, ram, "RAM");
+                var cpuPos = new SKPoint(gr * 1.4f, h - gr * 1.35f);
+                var ramPos = new SKPoint(w - gr * 1.4f, h - gr * 1.35f);
+                var edge = maxR * 1.02f;
+                DrawFlowLine(canvas, cpuPos, new SKPoint(cx, cy), edge, GaugeColor(cpu));
+                DrawFlowLine(canvas, ramPos, new SKPoint(cx, cy), edge, GaugeColor(ram));
+                DrawGauge(canvas, cpuPos.X, cpuPos.Y, gr, cpu, "CPU");
+                DrawGauge(canvas, ramPos.X, ramPos.Y, gr, ram, "RAM");
+
+                // Zegar (lewy górny) + telemetria wokół orba.
+                DrawClock(canvas, 8, 8);
+                DrawTelemetry(canvas, w, h, color);
             }
+        }
+
+        // Linia danych z węzła (gauge) do krawędzi orba z płynącymi „pakietami".
+        private void DrawFlowLine(SKCanvas canvas, SKPoint from, SKPoint center, float orbEdge, SKColor color)
+        {
+            var dx = center.X - from.X;
+            var dy = center.Y - from.Y;
+            var dist = (float)Math.Sqrt(dx * dx + dy * dy);
+            if (dist < 1f)
+                return;
+
+            // Kończ na krawędzi orba, nie w środku.
+            var ux = dx / dist;
+            var uy = dy / dist;
+            var to = new SKPoint(center.X - ux * orbEdge, center.Y - uy * orbEdge);
+
+            using (var lane = new SKPaint { Color = color.WithAlpha(45), IsAntialias = true, StrokeWidth = 1.2f, Style = SKPaintStyle.Stroke })
+                canvas.DrawLine(from, to, lane);
+
+            // Pakiety danych przesuwające się ku orbowi.
+            using var dot = new SKPaint { Color = color.WithAlpha(220), IsAntialias = true };
+            for (var i = 0; i < 3; i++)
+            {
+                var t = (float)Frac(seconds * 0.6 + i / 3.0);
+                var x = from.X + (to.X - from.X) * t;
+                var y = from.Y + (to.Y - from.Y) * t;
+                dot.Color = color.WithAlpha((byte)(220 * (1 - t) + 35));
+                canvas.DrawCircle(x, y, 2.4f, dot);
+            }
+        }
+
+        private void DrawClock(SKCanvas canvas, float x, float y)
+        {
+            using var timeFont = new SKFont(Futuristic, 30);
+            using var timePaint = new SKPaint { Color = BrightCyan.WithAlpha(230), IsAntialias = true };
+            canvas.DrawText(now.ToString("HH:mm:ss"), x, y + 26, SKTextAlign.Left, timeFont, timePaint);
+
+            using var dateFont = new SKFont(Futuristic, 14);
+            using var datePaint = new SKPaint { Color = Cyan.WithAlpha(170), IsAntialias = true };
+            canvas.DrawText(now.ToString("dddd, dd.MM.yyyy"), x + 2, y + 46, SKTextAlign.Left, dateFont, datePaint);
+        }
+
+        // Panele telemetrii wokół orba. Wartości realne (PROC) + miejsca na integracje (—).
+        private void DrawTelemetry(SKCanvas canvas, float w, float h, SKColor color)
+        {
+            var proc = lastTurnMs > 0 ? $"{lastTurnMs:0} ms" : "—";
+            DrawReadout(canvas, 8, h * 0.32f, "PRZETWARZANIE", proc, color);
+            DrawReadout(canvas, 8, h * 0.32f + 44, "GABINET", "—", color);
+            DrawReadout(canvas, 8, h * 0.32f + 88, "QNAP", "—", color);
+
+            DrawReadoutRight(canvas, w - 8, h * 0.32f, "HOME ASSISTANT", "—", color);
+            DrawReadoutRight(canvas, w - 8, h * 0.32f + 44, "SERWER AI", "—", color);
+            DrawReadoutRight(canvas, w - 8, h * 0.32f + 88, "KAMERA", "—", color);
+        }
+
+        private void DrawReadout(SKCanvas canvas, float x, float y, string label, string value, SKColor color)
+        {
+            // Subtelne pulsowanie ramki.
+            var a = (byte)(80 + 60 * (0.5 + 0.5 * Math.Sin(seconds * 2 + x + y)));
+            using (var bar = new SKPaint { Color = color.WithAlpha(a), IsAntialias = true })
+                canvas.DrawRect(x, y, 3, 30, bar);
+            using (var lFont = new SKFont(Futuristic, 11))
+            using (var lPaint = new SKPaint { Color = color.WithAlpha(150), IsAntialias = true })
+                canvas.DrawText(label, x + 10, y + 12, SKTextAlign.Left, lFont, lPaint);
+            using (var vFont = new SKFont(Futuristic, 17))
+            using (var vPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true })
+                canvas.DrawText(value, x + 10, y + 30, SKTextAlign.Left, vFont, vPaint);
+        }
+
+        private void DrawReadoutRight(SKCanvas canvas, float x, float y, string label, string value, SKColor color)
+        {
+            var a = (byte)(80 + 60 * (0.5 + 0.5 * Math.Sin(seconds * 2 + x + y)));
+            using (var bar = new SKPaint { Color = color.WithAlpha(a), IsAntialias = true })
+                canvas.DrawRect(x - 3, y, 3, 30, bar);
+            using (var lFont = new SKFont(Futuristic, 11))
+            using (var lPaint = new SKPaint { Color = color.WithAlpha(150), IsAntialias = true })
+                canvas.DrawText(label, x - 10, y + 12, SKTextAlign.Right, lFont, lPaint);
+            using (var vFont = new SKFont(Futuristic, 17))
+            using (var vPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true })
+                canvas.DrawText(value, x - 10, y + 30, SKTextAlign.Right, vFont, vPaint);
         }
 
         private void DrawRipples(SKCanvas canvas, float cx, float cy, float maxR, SKColor color, float intensity)

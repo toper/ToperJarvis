@@ -26,6 +26,9 @@ public interface IAssistantOrchestrator
     /// <summary>Zgłaszane po dodaniu wpisu do konwersacji (użytkownik/asystent).</summary>
     event EventHandler<TranscriptEntry>? TranscriptAdded;
 
+    /// <summary>Zgłaszane po zakończeniu tury (przetworzeniu komendy) z czasem w milisekundach.</summary>
+    event EventHandler<double>? TurnCompleted;
+
     /// <summary>Uruchamia przechwytywanie audio i nasłuch słowa-klucza.</summary>
     void Start();
 

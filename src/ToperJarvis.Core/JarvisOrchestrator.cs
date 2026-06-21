@@ -72,6 +72,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
     public event EventHandler<AssistantState>? StateChanged;
     public event EventHandler<TranscriptEntry>? TranscriptAdded;
+    public event EventHandler<double>? TurnCompleted;
 
     public void Start()
     {
@@ -206,6 +207,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private async Task ProcessTextAsync(string userText, CancellationToken ct)
     {
         await _turnGate.WaitAsync(ct);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             AddTranscript(TranscriptRole.User, userText);
@@ -270,6 +272,8 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         }
         finally
         {
+            stopwatch.Stop();
+            TurnCompleted?.Invoke(this, stopwatch.Elapsed.TotalMilliseconds);
             _turnGate.Release();
             SetState(AssistantState.Idle);
         }

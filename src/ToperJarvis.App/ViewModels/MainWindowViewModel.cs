@@ -27,6 +27,10 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private double _micLevel;
 
+    /// <summary>Czas przetwarzania ostatniej komendy (ms) — telemetria HUD.</summary>
+    [ObservableProperty]
+    private double _lastTurnMs;
+
     public ObservableCollection<string> Transcript { get; } = new();
 
     /// <summary>Metryki systemu dla HUD (CPU/RAM).</summary>
@@ -47,6 +51,8 @@ public partial class MainWindowViewModel : ViewModelBase
             });
         _orchestrator.TranscriptAdded += (_, entry) =>
             Dispatcher.UIThread.Post(() => Transcript.Add($"{Prefix(entry.Role)} {entry.Text}"));
+        _orchestrator.TurnCompleted += (_, ms) =>
+            Dispatcher.UIThread.Post(() => LastTurnMs = ms);
 
         if (capture is not null)
             capture.FrameAvailable += OnAudioFrame;
@@ -102,6 +108,7 @@ public partial class MainWindowViewModel : ViewModelBase
         public AssistantState State => AssistantState.Idle;
         public event EventHandler<AssistantState>? StateChanged { add { } remove { } }
         public event EventHandler<TranscriptEntry>? TranscriptAdded { add { } remove { } }
+        public event EventHandler<double>? TurnCompleted { add { } remove { } }
         public void Start() { }
         public void Stop() { }
         public Task SubmitTextAsync(string text, CancellationToken ct = default) => Task.CompletedTask;
