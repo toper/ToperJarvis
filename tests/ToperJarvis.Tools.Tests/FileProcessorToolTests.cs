@@ -16,7 +16,10 @@ public class FileProcessorToolTests
     [InlineData(".XLSX", "Document")] // case-insensitive
     [InlineData(".pptx", "Document")]
     [InlineData(".zip", "Archive")]
-    [InlineData(".mp4", "Unsupported")] // wideo dopiero w kolejnym kroku
+    [InlineData(".mp3", "Media")]
+    [InlineData(".MP4", "Media")] // wideo też jako media (transkrypcja audio)
+    [InlineData(".flac", "Media")]
+    [InlineData(".rar", "Unsupported")] // inne archiwa odłożone
     [InlineData("", "Unsupported")]
     public void Classify_rozpoznaje_typ_pliku(string extension, string expected)
     {
