@@ -62,6 +62,15 @@ public sealed class VisionOptions
     public string Model { get; set; } = "";
 
     public string ApiKey { get; set; } = "not-needed";
+
+    /// <summary>
+    /// Maksymalna liczba tokenów odpowiedzi. Wizja jest wołana z wyłączonym myśleniem
+    /// (<c>enable_thinking:false</c>), więc opisy są zwięzłe.
+    /// </summary>
+    public int MaxTokens { get; set; } = 1024;
+
+    /// <summary>Limit czasu pojedynczego żądania wizji (sekundy).</summary>
+    public int TimeoutSeconds { get; set; } = 120;
 }
 
 /// <summary>Rozpoznawanie mowy offline (Whisper.net).</summary>
