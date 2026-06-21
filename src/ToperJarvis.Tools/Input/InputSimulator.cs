@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace ToperJarvis.Tools.Input;
 
@@ -13,14 +14,53 @@ internal static class InputSimulator
     private const uint MouseRightDown = 0x0008, MouseRightUp = 0x0010;
     private const uint MouseWheel = 0x0800;
 
-    /// <summary>Wpisuje tekst znak po znaku (Unicode).</summary>
-    public static void TypeText(string text)
+    /// <summary>Wpisuje tekst znak po znaku (Unicode). Zwraca liczbę faktycznie wstrzykniętych zdarzeń.</summary>
+    public static uint TypeText(string text)
     {
+        uint sent = 0;
         foreach (var ch in text)
         {
-            SendKeyboard(0, ch, KeyEventUnicode);
-            SendKeyboard(0, ch, KeyEventUnicode | KeyEventKeyUp);
+            sent += SendKeyboard(0, ch, KeyEventUnicode);
+            sent += SendKeyboard(0, ch, KeyEventUnicode | KeyEventKeyUp);
         }
+
+        return sent;
+    }
+
+    /// <summary>
+    /// Ustawia na pierwszym planie okno, którego tytuł zawiera podany fragment (bez rozróżniania
+    /// wielkości liter). Zwraca true, gdy okno znaleziono i aktywowano.
+    /// </summary>
+    public static bool FocusWindow(string titleFragment)
+    {
+        if (string.IsNullOrWhiteSpace(titleFragment))
+            return false;
+
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((hWnd, _) =>
+        {
+            if (!IsWindowVisible(hWnd))
+                return true;
+
+            var len = GetWindowTextLength(hWnd);
+            if (len == 0)
+                return true;
+
+            var sb = new StringBuilder(len + 1);
+            GetWindowText(hWnd, sb, sb.Capacity);
+            if (sb.ToString().Contains(titleFragment, StringComparison.OrdinalIgnoreCase))
+            {
+                found = hWnd;
+                return false; // przerwij enumerację
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        if (found == IntPtr.Zero)
+            return false;
+
+        return SetForegroundWindow(found);
     }
 
     /// <summary>Wciska i zwalnia pojedynczy klawisz (VK).</summary>
@@ -57,14 +97,14 @@ internal static class InputSimulator
 
     public static void Scroll(int amount) => mouse_event(MouseWheel, 0, 0, amount, UIntPtr.Zero);
 
-    private static void SendKeyboard(ushort vk, ushort scan, uint flags)
+    private static uint SendKeyboard(ushort vk, ushort scan, uint flags)
     {
         var input = new INPUT
         {
             type = InputKeyboard,
             u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = flags } },
         };
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        return SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -99,4 +139,24 @@ internal static class InputSimulator
 
     [DllImport("user32.dll")]
     private static extern void mouse_event(uint dwFlags, int dx, int dy, int dwData, UIntPtr dwExtraInfo);
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 }

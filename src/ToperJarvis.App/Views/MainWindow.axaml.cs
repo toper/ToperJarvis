@@ -1,6 +1,7 @@
+using System.Collections.Specialized;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Interactivity;
+using Avalonia.Threading;
 using ToperJarvis.App.ViewModels;
 
 namespace ToperJarvis.App.Views;
@@ -11,9 +12,20 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         KeyDown += OnWindowKeyDown;
+        DataContextChanged += OnDataContextChanged;
     }
 
-    /// <summary>F11 — pełny ekran / okno; F4 — (zarezerwowane) wyciszenie mikrofonu.</summary>
+    // Po dodaniu wpisu do transkryptu przewijamy na dół (najnowsze widoczne).
+    private void OnDataContextChanged(object? sender, System.EventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.Transcript.CollectionChanged += OnTranscriptChanged;
+    }
+
+    private void OnTranscriptChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        Dispatcher.UIThread.Post(() => TranscriptScroll.ScrollToEnd(), DispatcherPriority.Background);
+
+    /// <summary>F11 — przełącza pełny ekran/okno; Esc — wychodzi z pełnego ekranu.</summary>
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.F11)
@@ -21,6 +33,11 @@ public partial class MainWindow : Window
             WindowState = WindowState == WindowState.FullScreen
                 ? WindowState.Normal
                 : WindowState.FullScreen;
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && WindowState == WindowState.FullScreen)
+        {
+            WindowState = WindowState.Normal;
             e.Handled = true;
         }
     }

@@ -15,26 +15,90 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <Grid RowDefinitions="Auto,*,Auto" Margin="24">
+    <Window.Styles>
+        <!-- Futurystyczny przycisk HUD: cyjanowa obwódka, poświata, narożne akcenty, Bahnschrift. -->
+        <Style Selector="Button.hud">
+            <Setter Property="Foreground" Value="#CFefff"/>
+            <Setter Property="FontFamily" Value="Bahnschrift, Segoe UI"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Name="bg" CornerRadius="2" BorderThickness="1.4"
+                            BorderBrush="#4FC3F7">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                <GradientStop Offset="0" Color="#1F4A5E"/>
+                                <GradientStop Offset="1" Color="#12303D"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <Grid>
+                            <!-- narożne akcenty -->
+                            <Rectangle Width="10" Height="2" Fill="#9FE8FF" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="3"/>
+                            <Rectangle Width="2" Height="10" Fill="#9FE8FF" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="3"/>
+                            <Rectangle Width="10" Height="2" Fill="#9FE8FF" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3"/>
+                            <Rectangle Width="2" Height="10" Fill="#9FE8FF" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3"/>
+                            <ContentPresenter Content="{TemplateBinding Content}"
+                                              HorizontalContentAlignment="Center"
+                                              VerticalContentAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="Button.hud:pointerover /template/ Border#bg">
+            <Setter Property="BorderBrush" Value="#B3ECFF"/>
+            <Setter Property="BoxShadow" Value="0 0 18 1 #804FC3F7"/>
+        </Style>
+        <Style Selector="Button.hud:pressed /template/ Border#bg">
+            <Setter Property="Background" Value="#2A6A85"/>
+        </Style>
+    </Window.Styles>
 
-        <!-- Nagłówek: stan asystenta + HUD -->
-        <StackPanel Grid.Row="0" Spacing="4" Margin="0,0,0,16">
-            <TextBlock Text="JARVIS" FontSize="28" FontWeight="Bold" Foreground="#4FC3F7"/>
-            <TextBlock Text="{Binding StateText}" FontSize="16" Foreground="#B0BEC5"/>
-            <ctrl:HudControl Height="160" Margin="0,8,0,0"
-                             State="{Binding State}"
+    <Grid RowDefinitions="*,Auto,Auto" Margin="24">
+
+        <!-- HUD/orb wypełnia wolną przestrzeń okna; mini-podgląd kamery w prawym górnym rogu -->
+        <Panel Grid.Row="0">
+            <ctrl:HudControl State="{Binding State}"
                              Cpu="{Binding Metrics.CpuPercent}"
-                             Ram="{Binding Metrics.RamPercent}"/>
-        </StackPanel>
+                             Ram="{Binding Metrics.RamPercent}"
+                             GpuUtil="{Binding GpuUtil}"
+                             PowerW="{Binding PowerW}"
+                             MicLevel="{Binding MicLevel}"
+                             LastTurnMs="{Binding LastTurnMs}"
+                             Telemetry="{Binding Telemetry}"/>
+            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0"
+                    Width="240" Height="135" CornerRadius="3"
+                    BorderBrush="#4FC3F7" BorderThickness="1" ClipToBounds="True"
+                    Background="#0E1626"
+                    IsVisible="{Binding CameraFrame, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <Panel>
+                    <Image Source="{Binding CameraFrame}" Stretch="UniformToFill"/>
+                    <TextBlock Text="KAMERA" FontSize="10" Foreground="#9FE8FF"
+                               FontFamily="Bahnschrift, Segoe UI"
+                               HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="6,0,0,4"/>
+                </Panel>
+            </Border>
+        </Panel>
 
-        <!-- Transkrypt konwersacji -->
-        <Border Grid.Row="1" Background="#111827" CornerRadius="8" Padding="12">
-            <ScrollViewer>
-                <ItemsControl ItemsSource="{Binding Transcript}">
+        <!-- Transkrypt: ~25% wysokości okna, zakotwiczony do dołu, długi gradient zaniku u góry -->
+        <Border Grid.Row="1" Background="#111827" CornerRadius="8" Padding="12,0"
+                ClipToBounds="True" VerticalAlignment="Bottom"
+                Height="{Binding $parent[Window].Bounds.Height, Converter={StaticResource Ratio}, ConverterParameter=0.25}">
+            <ScrollViewer x:Name="TranscriptScroll" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer.OpacityMask>
+                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                        <GradientStop Offset="0.0" Color="#00000000"/>
+                        <GradientStop Offset="0.45" Color="#FF000000"/>
+                        <GradientStop Offset="1.0" Color="#FF000000"/>
+                    </LinearGradientBrush>
+                </ScrollViewer.OpacityMask>
+                <ItemsControl ItemsSource="{Binding Transcript}" VerticalAlignment="Bottom" Margin="0,16">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding}" TextWrapping="Wrap"
-                                       Foreground="#ECEFF1" Margin="0,4"/>
+                                       Foreground="#ECEFF1" Margin="0,6"/>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -44,9 +108,23 @@
         <!-- Wejście tekstowe -->
         <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,16,0,0">
             <TextBox Grid.Column="0" Text="{Binding InputText}"
-                     Watermark="Wpisz komendę…" FontSize="14"
-                     KeyDown="OnInputKeyDown"/>
-            <Button Grid.Column="1" Content="Wyślij" Margin="8,0,0,0"
+                     PlaceholderText="Wpisz komendę…" FontSize="14"
+                     Foreground="#ECEFF1" Background="#1B2435"
+                     CaretBrush="#4FC3F7"
+                     KeyDown="OnInputKeyDown">
+                <TextBox.Resources>
+                    <!-- Wymuszenie czytelnych kolorów we wszystkich stanach (Fluent nadpisuje je przy fokusie). -->
+                    <SolidColorBrush x:Key="TextControlBackground" Color="#1B2435"/>
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#1B2435"/>
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#0E1626"/>
+                    <SolidColorBrush x:Key="TextControlForeground" Color="#ECEFF1"/>
+                    <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#ECEFF1"/>
+                    <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FFFFFF"/>
+                </TextBox.Resources>
+            </TextBox>
+            <Button Grid.Column="1" Classes="hud" Content="WYŚLIJ" Margin="10,0,0,0"
+                    Padding="26,0" MinWidth="120"
+                    VerticalAlignment="Stretch"
                     Command="{Binding SendCommand}"/>
         </Grid>
     </Grid>

@@ -15,6 +15,7 @@ public static class SpeechServiceCollectionExtensions
     public static IServiceCollection AddJarvisSpeech(this IServiceCollection services)
     {
         services.AddSingleton<IAudioCapture, NAudioCapture>();
+        services.AddSingleton<IAudioOutput, NAudioOutput>();
         services.AddSingleton<ISpeechToText, WhisperSpeechToText>();
         services.AddSingleton<ITextToSpeech, PiperTextToSpeech>();
 

@@ -26,6 +26,9 @@ public interface IAssistantOrchestrator
     /// <summary>Zgłaszane po dodaniu wpisu do konwersacji (użytkownik/asystent).</summary>
     event EventHandler<TranscriptEntry>? TranscriptAdded;
 
+    /// <summary>Zgłaszane po zakończeniu tury (przetworzeniu komendy) z czasem w milisekundach.</summary>
+    event EventHandler<double>? TurnCompleted;
+
     /// <summary>Uruchamia przechwytywanie audio i nasłuch słowa-klucza.</summary>
     void Start();
 
@@ -34,4 +37,10 @@ public interface IAssistantOrchestrator
 
     /// <summary>Przetwarza komendę wpisaną tekstem (z pominięciem STT/wake-word).</summary>
     Task SubmitTextAsync(string text, CancellationToken ct = default);
+
+    /// <summary>Push-to-talk: początek nasłuchu (przytrzymano klawisz). Nagrywa do puszczenia.</summary>
+    void BeginPushToTalk();
+
+    /// <summary>Push-to-talk: koniec nasłuchu (puszczono klawisz) — przetwarza nagranie.</summary>
+    void EndPushToTalk();
 }

@@ -28,12 +28,17 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private readonly IMemoryStore _memory;
     private readonly ILogger<JarvisOrchestrator> _logger;
     private readonly AudioOptions _audio;
+    private readonly LlmOptions _llm;
     private readonly ChatOptions _chatOptions;
 
     private readonly List<ChatMessage> _history = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     private VadBuffer? _vad;
     private bool _started;
+
+    // Push-to-talk: bufor nagrania między wciśnięciem a puszczeniem klawisza.
+    private readonly List<float> _pttBuffer = new();
+    private volatile bool _pttActive;
 
     public JarvisOrchestrator(
         IAudioCapture capture,
@@ -56,6 +61,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         _memory = memory;
         _logger = logger;
         _audio = options.Value.Audio;
+        _llm = options.Value.Llm;
         _chatOptions = new ChatOptions
         {
             Tools = tools.Select(t => (AITool)t.AsAIFunction()).ToList(),
@@ -66,6 +72,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
     public event EventHandler<AssistantState>? StateChanged;
     public event EventHandler<TranscriptEntry>? TranscriptAdded;
+    public event EventHandler<double>? TurnCompleted;
 
     public void Start()
     {
@@ -136,6 +143,51 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         }
     }
 
+    public void BeginPushToTalk()
+    {
+        if (!_started || _pttActive || State != AssistantState.Idle)
+            return;
+
+        _pttActive = true;
+        lock (_pttBuffer)
+            _pttBuffer.Clear();
+
+        _capture.FrameAvailable += OnPttFrame;
+        SetState(AssistantState.Listening);
+        _logger.LogInformation("Push-to-talk: nasłuch (przytrzymano klawisz).");
+    }
+
+    public void EndPushToTalk()
+    {
+        if (!_pttActive)
+            return;
+
+        _pttActive = false;
+        _capture.FrameAvailable -= OnPttFrame;
+
+        float[] samples;
+        lock (_pttBuffer)
+            samples = _pttBuffer.ToArray();
+
+        var seconds = samples.Length / (float)_capture.SampleRate;
+        _logger.LogInformation("Push-to-talk: koniec, nagrano {Seconds:F1} s.", seconds);
+
+        // Zbyt krótkie (przypadkowe tknięcie) — ignoruj.
+        if (samples.Length < _capture.SampleRate * 0.3)
+        {
+            SetState(AssistantState.Idle);
+            return;
+        }
+
+        _ = ProcessUtteranceAsync(samples);
+    }
+
+    private void OnPttFrame(object? sender, AudioFrame frame)
+    {
+        lock (_pttBuffer)
+            _pttBuffer.AddRange(frame.Samples);
+    }
+
     public async Task SubmitTextAsync(string text, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -155,6 +207,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private async Task ProcessTextAsync(string userText, CancellationToken ct)
     {
         await _turnGate.WaitAsync(ct);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             AddTranscript(TranscriptRole.User, userText);
@@ -219,6 +272,8 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         }
         finally
         {
+            stopwatch.Stop();
+            TurnCompleted?.Invoke(this, stopwatch.Elapsed.TotalMilliseconds);
             _turnGate.Release();
             SetState(AssistantState.Idle);
         }
@@ -254,6 +309,10 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         var facts = _memory.FormatForPrompt();
         if (facts.Length > 0)
             prompt += "\n\n" + facts;
+
+        // Wyłączenie „myślenia" Qwen3 dla szybszych odpowiedzi (soft-switch w prompcie).
+        if (!_llm.EnableThinking)
+            prompt += "\n\n/no_think";
 
         _history.Add(new ChatMessage(ChatRole.System, prompt));
     }

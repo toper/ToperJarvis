@@ -9,6 +9,10 @@
         <local:ViewLocator/>
     </Application.DataTemplates>
 
+    <Application.Resources>
+        <local:RatioConverter x:Key="Ratio"/>
+    </Application.Resources>
+
     <TrayIcon.Icons>
         <TrayIcons>
             <TrayIcon Icon="/Assets/avalonia-logo.ico" ToolTipText="ToperJarvis"

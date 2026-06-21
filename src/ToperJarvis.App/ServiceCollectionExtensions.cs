@@ -14,8 +14,13 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddJarvisApp(this IServiceCollection services)
     {
-        // Metryki systemu (HUD) + ViewModele
+        // Metryki systemu (HUD) + ViewModele + zapis ustawień użytkownika
         services.AddSingleton<Services.SystemMetricsService>();
+        services.AddSingleton<Services.LocalSettingsWriter>();
+        // Źródła telemetrii HUD: Home Assistant, DGX (GPU), lokalna kamera
+        services.AddSingleton<Services.HomeAssistantClient>();
+        services.AddSingleton<Services.DgxClient>();
+        services.AddSingleton<Services.WebcamService>();
         services.AddSingleton<MainWindowViewModel>();
 
         // Warstwa mowy: audio, wake-word, STT, TTS
