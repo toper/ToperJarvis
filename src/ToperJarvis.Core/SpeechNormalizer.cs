@@ -26,6 +26,7 @@ public static class SpeechNormalizer
         ["USD"] = "dolarów",
         ["EUR"] = "euro",
         ["PLN"] = "złotych",
+        ["zł"] = "złotych",
         ["GBP"] = "funtów",
         ["CHF"] = "franków",
         ["kWh"] = "kilowatogodzin",

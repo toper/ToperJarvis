@@ -129,7 +129,7 @@
         </Border>
 
         <!-- Wejście tekstowe -->
-        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,16,0,0">
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,16,0,0">
             <TextBox Grid.Column="0" Text="{Binding InputText}"
                      PlaceholderText="Wpisz komendę…" FontSize="14"
                      Foreground="#ECEFF1" Background="#1B2435"
@@ -145,7 +145,12 @@
                     <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FFFFFF"/>
                 </TextBox.Resources>
             </TextBox>
-            <Button Grid.Column="1" Classes="hud" Content="WYŚLIJ" Margin="10,0,0,0"
+            <Button Grid.Column="1" Classes="hud" Content="RESET" Margin="10,0,0,0"
+                    Padding="20,0" MinWidth="90"
+                    VerticalAlignment="Stretch"
+                    ToolTip.Tip="Czyści historię rozmowy wysyłaną do mózgu — kolejna komenda startuje od zera."
+                    Command="{Binding ClearContextCommand}"/>
+            <Button Grid.Column="2" Classes="hud" Content="WYŚLIJ" Margin="10,0,0,0"
                     Padding="26,0" MinWidth="120"
                     VerticalAlignment="Stretch"
                     Command="{Binding SendCommand}"/>

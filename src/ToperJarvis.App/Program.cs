@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using Avalonia;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -19,11 +20,39 @@ sealed class Program
 
     private static IHost? _host;
 
+    /// <summary>
+    /// Mutex pojedynczej instancji. Trzymany przez cały czas życia procesu (pole statyczne), zwalniany
+    /// dopiero przy zakończeniu. Druga instancja nie przejmie własności i zakończy się od razu — to
+    /// chroni m.in. port MCP 8765 przed konfliktem „address already in use".
+    /// </summary>
+    private static Mutex? _singleInstanceMutex;
+
+    private const string SingleInstanceMutexName = @"Local\ToperJarvis.App.SingleInstance";
+
     // Initialization code. Don't use any Avalonia, third-party APIs or any
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
     [STAThread]
     public static void Main(string[] args)
+    {
+        // Pojedyncza instancja: jeśli mutex już istnieje, inna kopia działa — wychodzimy po cichu
+        // (WinExe nie ma konsoli, a Avalonia nie jest jeszcze zainicjalizowana, więc bez UI).
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
+        if (!createdNew)
+            return;
+
+        try
+        {
+            Run(args);
+        }
+        finally
+        {
+            _singleInstanceMutex.ReleaseMutex();
+            _singleInstanceMutex.Dispose();
+        }
+    }
+
+    private static void Run(string[] args)
     {
         // Ujednolicenie katalogu roboczego z lokalizacją exe — NanoWakeWord ładuje modele ONNX
         // ze ścieżki względnej „models/", a względne ścieżki assetów też liczą się od katalogu app.

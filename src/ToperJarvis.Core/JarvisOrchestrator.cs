@@ -74,6 +74,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
     public event EventHandler<AssistantState>? StateChanged;
     public event EventHandler<TranscriptEntry>? TranscriptAdded;
+    public event EventHandler<AssistantStreamChunk>? AssistantStreaming;
     public event EventHandler<double>? TurnCompleted;
 
     public void Start()
@@ -236,6 +237,8 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                         continue;
 
                     assistant.Append(delta);
+                    // Pokaż tekst na bieżąco (równolegle z TTS) — UI sam throttluje renderowanie.
+                    AssistantStreaming?.Invoke(this, new AssistantStreamChunk(assistant.ToString(), false));
                     foreach (var sentence in accumulator.Add(delta))
                     {
                         // Normalizuj pod TTS: usuń Markdown, zastosuj leksykon wymowy. Puste pomiń.
@@ -262,12 +265,12 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                     }
                 }
 
-                // Pokaż pełną odpowiedź (surowy Markdown — UI renderuje) po wygenerowaniu.
+                // Domknij prezentację: pełny tekst (surowy Markdown — UI renderuje) i zapis do historii.
                 var full = assistant.ToString().Trim();
                 if (full.Length > 0)
                 {
                     _history.Add(new ChatMessage(ChatRole.Assistant, full));
-                    AddTranscript(TranscriptRole.Assistant, full);
+                    AssistantStreaming?.Invoke(this, new AssistantStreamChunk(full, true));
                 }
             }
             finally
@@ -306,6 +309,28 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     {
         try { _turnCts?.Cancel(); }
         catch (ObjectDisposedException) { /* tura już zakończona */ }
+    }
+
+    /// <summary>
+    /// Czyści historię rozmowy. Najpierw przerywa bieżącą turę (by żaden wątek nie dopisywał do listy
+    /// w trakcie czyszczenia), potem kasuje historię pod bramką tury. Następna komenda doda system
+    /// prompt na nowo (zob. <see cref="EnsureSystemPrompt"/>).
+    /// </summary>
+    public void ClearContext()
+    {
+        Interrupt();
+        // Bramka tury serializuje względem trwającego przetwarzania — po jej zajęciu mamy pewność,
+        // że żaden ProcessTextAsync nie modyfikuje _history równolegle.
+        _turnGate.Wait();
+        try
+        {
+            _history.Clear();
+            _logger.LogInformation("Kontekst rozmowy wyczyszczony — historia pusta.");
+        }
+        finally
+        {
+            _turnGate.Release();
+        }
     }
 
     /// <summary>
