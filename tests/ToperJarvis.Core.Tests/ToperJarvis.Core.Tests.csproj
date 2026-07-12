@@ -22,4 +22,10 @@
     <ProjectReference Include="..\..\src\ToperJarvis.Llm\ToperJarvis.Llm.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Fixtures/mel_golden.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
