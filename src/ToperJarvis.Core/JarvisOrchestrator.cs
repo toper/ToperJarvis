@@ -32,12 +32,14 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private readonly LlmOptions _llm;
     private readonly ChatOptions _chatOptions;
     private readonly IReadOnlyDictionary<string, string> _lexicon;
+    private readonly IReadOnlyList<string> _fillerPhrases;
 
     private readonly List<ChatMessage> _history = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     private CancellationTokenSource? _turnCts;
     private IEndpointDetector? _vad;
     private bool _started;
+    private int _fillerIndex;
 
     // Push-to-talk: bufor nagrania między wciśnięciem a puszczeniem klawisza.
     private readonly List<float> _pttBuffer = new();
@@ -68,6 +70,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         _audio = options.Value.Audio;
         _llm = options.Value.Llm;
         _lexicon = options.Value.Tts.Lexicon;
+        _fillerPhrases = options.Value.Tts.FillerPhrases;
         // Mózgiem jest zdalny agent Hermes (Hektor) — to ON wywołuje narzędzia (lokalne przez MCP,
         // resztę własne). ToperJarvis nie wysyła już własnej listy narzędzi do modelu.
         _chatOptions = new ChatOptions();
@@ -233,6 +236,22 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
             var spoke = false;
             try
             {
+                // Natychmiastowy filler maskujący TTFT: gra w tle, podczas gdy LLM generuje pierwszy
+                // token. Idzie przez ten sam kanał TTS co realne zdania, więc naturalnie się szeregują
+                // (filler zawsze wybrzmi przed pierwszym realnym zdaniem — bez nakładania mowy).
+                // Pusta lista fraz = wyłącznik funkcji.
+                if (_fillerPhrases.Count > 0)
+                {
+                    var filler = _fillerPhrases[Interlocked.Increment(ref _fillerIndex) % _fillerPhrases.Count];
+                    var fillerSpeech = SpeechNormalizer.Normalize(filler, _lexicon);
+                    if (!string.IsNullOrWhiteSpace(fillerSpeech))
+                    {
+                        spoke = true;
+                        SetState(AssistantState.Speaking);
+                        await ttsChannel.Writer.WriteAsync(fillerSpeech, token);
+                    }
+                }
+
                 await foreach (var update in _chat.GetStreamingResponseAsync(_history, _chatOptions, token))
                 {
                     var delta = update.Text;

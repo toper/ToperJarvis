@@ -19,7 +19,24 @@ public static class SpeechServiceCollectionExtensions
         services.AddSingleton<IAudioCapture, NAudioCapture>();
         services.AddSingleton<IAudioOutput, NAudioOutput>();
         services.AddSingleton<ISpeechToText, WhisperSpeechToText>();
-        services.AddSingleton<ITextToSpeech, PiperTextToSpeech>();
+
+        // TTS: konkret Piper zarejestrowany osobno, by dekorator cache mógł go opakować bez
+        // duplikowania procesu Pipera. Cache włączany/wyłączany wg configu (Tts:CacheEnabled).
+        services.AddSingleton<PiperTextToSpeech>();
+        services.AddSingleton<IPcmSynthesizer>(sp => sp.GetRequiredService<PiperTextToSpeech>());
+        services.AddSingleton<ITextToSpeech>(sp =>
+        {
+            var opts = sp.GetRequiredService<IOptions<JarvisOptions>>().Value.Tts;
+            if (!opts.CacheEnabled)
+                return sp.GetRequiredService<PiperTextToSpeech>();
+
+            return new CachingTextToSpeech(
+                sp.GetRequiredService<IPcmSynthesizer>(),
+                sp.GetRequiredService<IAudioOutput>(),
+                opts,
+                sp.GetRequiredService<ILogger<CachingTextToSpeech>>());
+        });
+        services.AddHostedService<TtsWarmupService>();
 
         // Wybór silnika wake-word wg konfiguracji (domyślnie openWakeWord — bez klucza).
         // Nieznana wartość rzuca wyjątek zamiast cicho wybrać silnik — błąd configu nie jest maskowany.
