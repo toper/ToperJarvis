@@ -21,6 +21,7 @@ public sealed class JarvisOptions
     public CameraOptions Camera { get; set; } = new();
     public DgxOptions Dgx { get; set; } = new();
     public McpOptions Mcp { get; set; } = new();
+    public SmartTurnOptions SmartTurn { get; set; } = new();
 }
 
 /// <summary>
@@ -314,4 +315,20 @@ public sealed class AudioOptions
 
     /// <summary>Maksymalny czas mowy (sekundy).</summary>
     public double MaxSpeechSeconds { get; set; } = 30.0;
+
+    // "rms" = energetyczny VadBuffer (domyślny), "smartturn" = neuronowy endpointing (ONNX).
+    public string EndpointEngine { get; set; } = "rms";
+}
+
+/// <summary>Neuronowy endpointing (Smart Turn) — detekcja końca tury za pomocą modeli ONNX.</summary>
+public sealed class SmartTurnOptions
+{
+    public string ModelPath { get; set; } = "assets/smartturn/smart-turn-v3.1-cpu.onnx";
+    public string SileroVadPath { get; set; } = "assets/silero/silero_vad.onnx";
+    // Próg prawdopodobieństwa "user skończył turę".
+    public float CompletionThreshold { get; set; } = 0.5f;
+    // Twarde odcięcie długości tury (bezpiecznik jak MaxSpeechSeconds).
+    public double MaxTurnSeconds { get; set; } = 30.0;
+    // Ile ciszy (wg Silero) wyzwala zapytanie do Smart Turn o koniec tury.
+    public double VadSilenceSeconds { get; set; } = 0.2;
 }
