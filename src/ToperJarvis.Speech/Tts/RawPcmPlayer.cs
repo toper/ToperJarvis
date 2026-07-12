@@ -4,8 +4,10 @@ namespace ToperJarvis.Speech.Tts;
 
 /// <summary>
 /// Odtwarza surowy strumień PCM (16-bit mono) w miarę jego napływania, bez czekania na cały plik WAV.
-/// Używane przez streamingowe TTS (Piper), gdzie audio powstaje kawałkami — pierwszy fragment zaczyna
-/// grać, gdy tylko trafi do bufora, zamiast czekać na zakończenie syntezy całego zdania.
+/// Używane przez <see cref="CachingTextToSpeech"/> do odtwarzania zcache'owanego PCM (frazy filler).
+/// Streamingowe TTS "w locie" prosto z Pipera (Task 2.3) zostało pominięte (patrz decyzja w
+/// docs/superpowers/notes/piper-streaming-decision.md) — dominującym kosztem okazał się reload modelu,
+/// nie brak strumieniowania.
 /// Bezpieczne bez urządzenia audio (np. CI/headless): błąd inicjalizacji WaveOutEvent jest połykany.
 /// </summary>
 public sealed class RawPcmPlayer

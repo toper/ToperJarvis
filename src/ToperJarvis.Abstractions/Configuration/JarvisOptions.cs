@@ -253,9 +253,6 @@ public sealed class TtsOptions
     /// </summary>
     public Dictionary<string, string> Lexicon { get; set; } = new();
 
-    /// <summary>Strumieniowanie wyników PCM do głośnika w locie (zamiast oczekiwania na całą odpowiedź).</summary>
-    public bool Streaming { get; set; } = true;
-
     /// <summary>Liczba próbek na sekundę (Hz) — natywny sample rate modeli Piper.</summary>
     public int SampleRate { get; set; } = 22050;
 

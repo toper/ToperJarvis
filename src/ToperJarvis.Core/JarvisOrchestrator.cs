@@ -143,7 +143,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                 return;
             }
 
-            await ProcessTextAsync(text, CancellationToken.None);
+            await ProcessTextAsync(text, CancellationToken.None, enableFiller: true);
         }
         catch (Exception ex)
         {
@@ -204,7 +204,9 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
         try
         {
-            await ProcessTextAsync(text, ct);
+            // Wpisany tekst nie ma TTFT do maskowania (użytkownik widzi ekran, nie czeka na audio) —
+            // filler graliby się bez potrzeby, więc dla ścieżki tekstowej jest wyłączony.
+            await ProcessTextAsync(text, ct, enableFiller: false);
         }
         catch (Exception ex)
         {
@@ -213,7 +215,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         }
     }
 
-    private async Task ProcessTextAsync(string userText, CancellationToken ct)
+    private async Task ProcessTextAsync(string userText, CancellationToken ct, bool enableFiller)
     {
         await _turnGate.WaitAsync(ct);
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -239,16 +241,20 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                 // Natychmiastowy filler maskujący TTFT: gra w tle, podczas gdy LLM generuje pierwszy
                 // token. Idzie przez ten sam kanał TTS co realne zdania, więc naturalnie się szeregują
                 // (filler zawsze wybrzmi przed pierwszym realnym zdaniem — bez nakładania mowy).
-                // Pusta lista fraz = wyłącznik funkcji.
-                if (_fillerPhrases.Count > 0)
+                // Pusta lista fraz = wyłącznik funkcji. Tylko dla wypowiedzi głosowych — wpisany tekst
+                // nie ma TTFT do maskowania (zob. SubmitTextAsync).
+                // WAŻNE: enqueue RAW frazy (bez SpeechNormalizer) — CachingTextToSpeech buduje klucze
+                // cache z surowych FillerPhrases (NormalizeKey = Trim+ToLowerInvariant). Gdyby fraza
+                // przeszła przez SpeechNormalizer (leksykon/markdown), klucz runtime rozjechałby się
+                // z kluczem cache i filler byłby syntezowany na nowo za każdym razem.
+                if (enableFiller && _fillerPhrases.Count > 0)
                 {
                     var filler = _fillerPhrases[Interlocked.Increment(ref _fillerIndex) % _fillerPhrases.Count];
-                    var fillerSpeech = SpeechNormalizer.Normalize(filler, _lexicon);
-                    if (!string.IsNullOrWhiteSpace(fillerSpeech))
+                    if (!string.IsNullOrWhiteSpace(filler))
                     {
                         spoke = true;
                         SetState(AssistantState.Speaking);
-                        await ttsChannel.Writer.WriteAsync(fillerSpeech, token);
+                        await ttsChannel.Writer.WriteAsync(filler, token);
                     }
                 }
 

@@ -26,6 +26,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IPcmSynthesizer, IDisposa
 
     private Process? _piper;
     private int _counter;
+    private int? _actualSampleRate;
 
     public PiperTextToSpeech(IOptions<JarvisOptions> options, IAudioOutput output, ILogger<PiperTextToSpeech> logger)
     {
@@ -36,8 +37,14 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IPcmSynthesizer, IDisposa
         Directory.CreateDirectory(_tempDir);
     }
 
-    /// <summary>Częstotliwość próbkowania skonfigurowana dla modelu głosu (natywny sample rate Piper).</summary>
-    public int SampleRate => _options.SampleRate;
+    /// <summary>
+    /// Częstotliwość próbkowania modelu głosu. Po pierwszej udanej syntezie zwraca RZECZYWISTY sample
+    /// rate odczytany z wygenerowanego WAV (patrz <see cref="SynthesizeToWavAsync"/>/<see cref="PlayAsync"/>)
+    /// — chroni przed rozjazdem z <see cref="TtsOptions.SampleRate"/>, gdyby konfiguracja nie zgadzała
+    /// się z modelem (inaczej odtwarzanie z cache — <see cref="CachingTextToSpeech"/> — grałoby ze złą
+    /// prędkością). Przed pierwszą syntezą zwraca wartość skonfigurowaną.
+    /// </summary>
+    public int SampleRate => _actualSampleRate ?? _options.SampleRate;
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)
     {
@@ -99,6 +106,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IPcmSynthesizer, IDisposa
             try
             {
                 using var reader = new WaveFileReader(outPath);
+                _actualSampleRate ??= reader.WaveFormat.SampleRate;
                 var pcm = new byte[reader.Length];
                 var read = 0;
                 while (read < pcm.Length)
@@ -114,6 +122,14 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IPcmSynthesizer, IDisposa
             {
                 TryDelete(outPath);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Przerwanie syntezy (Esc/nowa komenda), jak w SpeakAsync: proces Pipera mógł zostać
+            // z niedoczytaną linią na stdout → rozjazd parowania żądanie↔odpowiedź. Reset zapewnia
+            // czysty proces dla następnego wywołania. To normalne zakończenie, nie błąd — brak logu Error.
+            ResetProcess();
+            return Array.Empty<byte>();
         }
         catch (Exception ex)
         {
@@ -244,6 +260,7 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IPcmSynthesizer, IDisposa
     private async Task PlayAsync(string wavPath, CancellationToken ct)
     {
         using var reader = new WaveFileReader(wavPath);
+        _actualSampleRate ??= reader.WaveFormat.SampleRate;
         using var output = new WaveOutEvent { DeviceNumber = _output.DeviceNumber };
         var tcs = new TaskCompletionSource();
 
