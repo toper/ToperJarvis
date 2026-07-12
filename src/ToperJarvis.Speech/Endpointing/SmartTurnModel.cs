@@ -94,16 +94,32 @@ public sealed class SmartTurnModel : IDisposable
                 return null;
             }
 
-            var options = new SessionOptions
+            try
             {
-                ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-                InterOpNumThreads = 1,
-                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-            };
+                var options = new SessionOptions
+                {
+                    ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+                    InterOpNumThreads = 1,
+                    GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                };
 
-            _session = new InferenceSession(_modelPath, options);
-            _logger.LogInformation("Smart Turn załadowany ({Model}).", _modelPath);
-            return _session;
+                _session = new InferenceSession(_modelPath, options);
+                _logger.LogInformation("Smart Turn załadowany ({Model}).", _modelPath);
+                return _session;
+            }
+            catch (Exception ex)
+            {
+                if (!_missingModelWarned)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Nie udało się załadować modelu Smart Turn z {Path} — endpointing degraduje do 'koniec tury'.",
+                        _modelPath);
+                    _missingModelWarned = true;
+                }
+
+                return null;
+            }
         }
     }
 
