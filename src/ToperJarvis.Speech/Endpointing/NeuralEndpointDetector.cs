@@ -67,11 +67,20 @@ public sealed class NeuralEndpointDetector : IEndpointDetector
             var frame = _carry.GetRange(offset, FrameSamples).ToArray();
             offset += FrameSamples;
 
+            // Zachowaj niezużyty ogon bieżącego chunku (próbki PO tej ramce) ZANIM ProcessFrame
+            // ewentualnie zakończy turę i wywoła Reset() — te próbki należą już do początku
+            // kolejnej wypowiedzi i nie mogą zginąć (barge-in, Faza 4).
+            var tail = _carry.Count > offset
+                ? _carry.GetRange(offset, _carry.Count - offset).ToArray()
+                : Array.Empty<float>();
+
             var result = ProcessFrame(frame);
             if (result is not null)
             {
-                // ProcessFrame już wywołał Reset() (koniec tury) — _carry jest wyczyszczony,
-                // razem z ewentualną resztką niedopełnionej ramki z tej porcji audio.
+                // ProcessFrame wywołał Reset() (koniec tury) — _carry jest wyczyszczony.
+                // Ponownie zasiej go niezużytym ogonem, by początek następnej tury nie zginął.
+                if (tail.Length > 0)
+                    _carry.AddRange(tail);
                 return result;
             }
         }
@@ -126,12 +135,12 @@ public sealed class NeuralEndpointDetector : IEndpointDetector
 
         if (_silenceCount >= _silenceSamples)
         {
-            var completion = _predictCompletion(_buffer.ToArray());
+            var snapshot = _buffer.ToArray();
+            var completion = _predictCompletion(snapshot);
             if (completion >= _opts.CompletionThreshold)
             {
-                var audio = _buffer.ToArray();
                 Reset();
-                return audio;
+                return snapshot;
             }
 
             // Użytkownik tylko zrobił pauzę — kontynuuj nasłuch, wyzeruj licznik ciszy, żeby
