@@ -15,7 +15,7 @@ namespace ToperJarvis.Speech.Tts;
 /// ms (zamiast ~400 ms narzutu na proces przy każdym zdaniu). Piper zapisuje WAV per zdanie i
 /// wypisuje jego ścieżkę na stdout — to sygnał końca syntezy. Odtwarzanie przez NAudio.
 /// </summary>
-public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
+public sealed class PiperTextToSpeech : ITextToSpeech, IPcmSynthesizer, IDisposable
 {
     private readonly TtsOptions _options;
     private readonly IAudioOutput _output;
@@ -36,6 +36,9 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
         Directory.CreateDirectory(_tempDir);
     }
 
+    /// <summary>Częstotliwość próbkowania skonfigurowana dla modelu głosu (natywny sample rate Piper).</summary>
+    public int SampleRate => _options.SampleRate;
+
     public async Task SpeakAsync(string text, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -44,37 +47,9 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
         await _gate.WaitAsync(ct);
         try
         {
-            var piper = EnsureProcess();
-            if (piper is null)
+            var outPath = await SynthesizeToWavAsync(text, ct);
+            if (outPath is null)
                 return;
-
-            var outPath = Path.Combine(_tempDir, $"seg_{Interlocked.Increment(ref _counter)}.wav");
-            var line = JsonSerializer.Serialize(new { text, output_file = outPath });
-
-            await piper.StandardInput.WriteLineAsync(line.AsMemory(), ct);
-            await piper.StandardInput.FlushAsync(ct);
-
-            // Piper wypisuje ścieżkę gotowego pliku WAV na stdout. Pomijamy ewentualne inne linie
-            // (banner/log), by nie rozjechać parowania żądanie↔odpowiedź; limit chroni przed zawisem.
-            string? donePath = null;
-            for (var i = 0; i < 8; i++)
-            {
-                var l = await piper.StandardOutput.ReadLineAsync(ct);
-                if (l is null)
-                    break; // proces padł
-                if (l.Trim().EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
-                {
-                    donePath = l.Trim();
-                    break;
-                }
-            }
-
-            if (donePath is null)
-            {
-                _logger.LogWarning("Piper nie zwrócił ścieżki audio (proces padł?). stderr: {Err}", RecentStderr());
-                ResetProcess();
-                return;
-            }
 
             if (File.Exists(outPath))
             {
@@ -102,6 +77,97 @@ public sealed class PiperTextToSpeech : ITextToSpeech, IDisposable
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>
+    /// Syntetyzuje tekst do bufora PCM (16-bit mono), bez odtwarzania. Używane przez cache
+    /// (<c>CachingTextToSpeech</c>) do wstępnej syntezy fraz filler. Brak Pipera/pliku → pusty bufor
+    /// (degradacja spójna z <see cref="SpeakAsync"/>).
+    /// </summary>
+    public async Task<byte[]> SynthesizeToPcmAsync(string text, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Array.Empty<byte>();
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var outPath = await SynthesizeToWavAsync(text, ct);
+            if (outPath is null || !File.Exists(outPath))
+                return Array.Empty<byte>();
+
+            try
+            {
+                using var reader = new WaveFileReader(outPath);
+                var pcm = new byte[reader.Length];
+                var read = 0;
+                while (read < pcm.Length)
+                {
+                    var n = await reader.ReadAsync(pcm.AsMemory(read), ct);
+                    if (n <= 0)
+                        break;
+                    read += n;
+                }
+                return read == pcm.Length ? pcm : pcm[..read];
+            }
+            finally
+            {
+                TryDelete(outPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Błąd syntezy Piper do PCM — restart procesu.");
+            ResetProcess();
+            return Array.Empty<byte>();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Wspólny rdzeń syntezy: wysyła zdanie do trwałego procesu Pipera przez stdin (protokół
+    /// <c>--json-input</c>) i czyta ścieżkę gotowego pliku WAV ze stdout. Współdzielony przez
+    /// <see cref="SpeakAsync"/> (synteza+odtwarzanie) i <see cref="SynthesizeToPcmAsync"/> (synteza→PCM),
+    /// by nie duplikować protokołu stdin/stdout Pipera. Wywołujący trzyma <c>_gate</c>.
+    /// </summary>
+    private async Task<string?> SynthesizeToWavAsync(string text, CancellationToken ct)
+    {
+        var piper = EnsureProcess();
+        if (piper is null)
+            return null;
+
+        var outPath = Path.Combine(_tempDir, $"seg_{Interlocked.Increment(ref _counter)}.wav");
+        var line = JsonSerializer.Serialize(new { text, output_file = outPath });
+
+        await piper.StandardInput.WriteLineAsync(line.AsMemory(), ct);
+        await piper.StandardInput.FlushAsync(ct);
+
+        // Piper wypisuje ścieżkę gotowego pliku WAV na stdout. Pomijamy ewentualne inne linie
+        // (banner/log), by nie rozjechać parowania żądanie↔odpowiedź; limit chroni przed zawisem.
+        string? donePath = null;
+        for (var i = 0; i < 8; i++)
+        {
+            var l = await piper.StandardOutput.ReadLineAsync(ct);
+            if (l is null)
+                break; // proces padł
+            if (l.Trim().EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+            {
+                donePath = l.Trim();
+                break;
+            }
+        }
+
+        if (donePath is null)
+        {
+            _logger.LogWarning("Piper nie zwrócił ścieżki audio (proces padł?). stderr: {Err}", RecentStderr());
+            ResetProcess();
+            return null;
+        }
+
+        return outPath;
     }
 
     /// <summary>Uruchamia (raz) trwały proces piper.exe w trybie json-input. Null = brak plików.</summary>
