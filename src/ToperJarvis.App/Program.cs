@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using Avalonia;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -68,8 +69,15 @@ sealed class Program
         }
         finally
         {
-            _host.StopAsync().GetAwaiter().GetResult();
-            _host.Dispose();
+            // Teardown na puli wątków, nie na wątku UI. Po powrocie z Avalonii wątek główny wciąż ma
+            // zainstalowany AvaloniaSynchronizationContext; gdyby StopAsync/Dispose (oraz ich await-y)
+            // były tu odczekane przez GetResult(), kontynuacje próbowałyby wrócić na ten zablokowany
+            // wątek → zakleszczenie i proces zostający w tle po zamknięciu okna.
+            Task.Run(async () =>
+            {
+                await _host.StopAsync();
+                _host.Dispose();
+            }).GetAwaiter().GetResult();
         }
     }
 
