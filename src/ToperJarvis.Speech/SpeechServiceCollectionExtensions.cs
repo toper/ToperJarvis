@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ToperJarvis.Abstractions.Configuration;
 using ToperJarvis.Abstractions.Speech;
 using ToperJarvis.Speech.Audio;
+using ToperJarvis.Speech.Endpointing;
 using ToperJarvis.Speech.Stt;
 using ToperJarvis.Speech.Tts;
 using ToperJarvis.Speech.WakeWord;
@@ -32,6 +34,18 @@ public static class SpeechServiceCollectionExtensions
                     $"Nieznany WakeWord:Engine '{engine}'. Dozwolone: 'openwakeword' (domyślny) lub 'porcupine'."),
             };
         });
+
+        services.AddSingleton(sp =>
+        {
+            var o = sp.GetRequiredService<IOptions<JarvisOptions>>().Value;
+            return new SileroVadModel(o.SmartTurn.SileroVadPath, sp.GetRequiredService<ILogger<SileroVadModel>>());
+        });
+        services.AddSingleton(sp =>
+        {
+            var o = sp.GetRequiredService<IOptions<JarvisOptions>>().Value;
+            return new SmartTurnModel(o.SmartTurn.ModelPath, sp.GetRequiredService<ILogger<SmartTurnModel>>());
+        });
+        services.AddSingleton<IEndpointDetectorFactory, EndpointDetectorFactory>();
 
         return services;
     }

@@ -9,7 +9,7 @@ using ToperJarvis.Abstractions.Speech;
 using ToperJarvis.Abstractions.Tools;
 using ToperJarvis.Core.Prompting;
 using ToperJarvis.Llm;
-using ToperJarvis.Speech.Vad;
+using ToperJarvis.Speech.Endpointing;
 
 namespace ToperJarvis.Core;
 
@@ -26,6 +26,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private readonly IChatClient _chat;
     private readonly SystemPromptProvider _prompt;
     private readonly IMemoryStore _memory;
+    private readonly IEndpointDetectorFactory _endpointFactory;
     private readonly ILogger<JarvisOrchestrator> _logger;
     private readonly AudioOptions _audio;
     private readonly LlmOptions _llm;
@@ -35,7 +36,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private readonly List<ChatMessage> _history = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     private CancellationTokenSource? _turnCts;
-    private VadBuffer? _vad;
+    private IEndpointDetector? _vad;
     private bool _started;
 
     // Push-to-talk: bufor nagrania między wciśnięciem a puszczeniem klawisza.
@@ -51,6 +52,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         SystemPromptProvider prompt,
         IMemoryStore memory,
         IEnumerable<IJarvisTool> tools,
+        IEndpointDetectorFactory endpointFactory,
         IOptions<JarvisOptions> options,
         ILogger<JarvisOrchestrator> logger)
     {
@@ -61,6 +63,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         _chat = chat;
         _prompt = prompt;
         _memory = memory;
+        _endpointFactory = endpointFactory;
         _logger = logger;
         _audio = options.Value.Audio;
         _llm = options.Value.Llm;
@@ -108,7 +111,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         if (State != AssistantState.Idle)
             return;
 
-        _vad = new VadBuffer(_audio);
+        _vad = _endpointFactory.Create();
         _capture.FrameAvailable += OnVadFrame;
         SetState(AssistantState.Listening);
     }
