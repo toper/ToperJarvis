@@ -258,6 +258,12 @@ public sealed class TtsOptions
 
     /// <summary>Liczba próbek na sekundę (Hz) — natywny sample rate modeli Piper.</summary>
     public int SampleRate { get; set; } = 22050;
+
+    /// <summary>Czy włączyć cache wyników TTS (przechowywanie wygenerowanego audio dla powtórzonych tekstów).</summary>
+    public bool CacheEnabled { get; set; } = true;
+
+    /// <summary>Frazy wypełniające — krótkie wyrażenia odtwarzane natychmiast podczas oczekiwania na odpowiedź LLM.</summary>
+    public List<string> FillerPhrases { get; set; } = new() { "Chwileczkę.", "Już sprawdzam." };
 }
 
 /// <summary>Wykrywanie słowa-klucza.</summary>
