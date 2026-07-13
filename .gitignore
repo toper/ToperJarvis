@@ -45,10 +45,8 @@ assets/piper/*
 assets/whisper/*.bin
 assets/voices/
 *.ppn
-# Modele neuralnego endpointingu (Smart Turn v3 / Silero VAD) — pobierane skryptem
-# assets/download-endpointing-models.ps1, nie trzymamy binarek w repo (patrz assets/whisper/*.bin).
-assets/smartturn/*.onnx
-assets/silero/*.onnx
+# Modele neuralnego endpointingu (Smart Turn v3 / Silero VAD) trzymane w repo.
+# Skrypt assets/download-endpointing-models.ps1 pozostaje jako alternatywa/aktualizacja.
 
 # Sekrety / konfiguracja lokalna
 secret/
