@@ -25,7 +25,8 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
     <PackageReference Include="OpenCvSharp4.Windows" Version="4.10.0.20241108" />
     <PackageReference Include="Markdown.Avalonia.Tight" Version="12.0.0-a3" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+    <!-- Microsoft.Extensions.Hosting jest dostarczany przez FrameworkReference Microsoft.AspNetCore.App
+         (poniżej) — jawny PackageReference był redundantny i powodował ostrzeżenie NU1510. -->
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
     <PackageReference Include="SkiaSharp" Version="3.119.4" />
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.9" />
@@ -46,4 +47,27 @@
     <ProjectReference Include="..\ToperJarvis.Platform.Windows\ToperJarvis.Platform.Windows.csproj" />
     <ProjectReference Include="..\ToperJarvis.Abstractions\ToperJarvis.Abstractions.csproj" />
   </ItemGroup>
+
+  <!--
+    Kompletna publikacja: po opublikowaniu kopiuje katalog assets/ (modele Whisper/Piper/Smart Turn/
+    Silero — trzymane poza wynikiem kompilacji) obok pliku wykonywalnego i usuwa deweloperski
+    appsettings.Local.json. Działa dla publikacji z Visual Studio (profil FolderProfile.pubxml) oraz
+    dla `dotnet publish` / scripts/publish.ps1. Czyszczenie katalogu robi profil (DeleteExistingFiles).
+  -->
+  <Target Name="PrepareCompletePublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <_JarvisAssetsDir>$(MSBuildProjectDirectory)\..\..\assets</_JarvisAssetsDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_JarvisAsset Include="$(_JarvisAssetsDir)\**\*" />
+    </ItemGroup>
+    <Copy Condition="Exists('$(_JarvisAssetsDir)')"
+          SourceFiles="@(_JarvisAsset)"
+          DestinationFiles="@(_JarvisAsset->'$(PublishDir)assets\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Warning Condition="!Exists('$(_JarvisAssetsDir)')"
+             Text="Brak katalogu assets/ — modele nie zostaly skopiowane do publikacji (zob. assets/SETUP.md)." />
+    <Delete Files="$(PublishDir)appsettings.Local.json" Condition="Exists('$(PublishDir)appsettings.Local.json')" />
+    <Message Importance="high" Text="Kompletny build: assets/ skopiowane do $(PublishDir)assets, usunieto appsettings.Local.json." />
+  </Target>
 </Project>
