@@ -45,6 +45,8 @@ assets/piper/*
 assets/whisper/*.bin
 assets/voices/
 *.ppn
+# Modele neuralnego endpointingu (Smart Turn v3 / Silero VAD) trzymane w repo.
+# Skrypt assets/download-endpointing-models.ps1 pozostaje jako alternatywa/aktualizacja.
 
 # Sekrety / konfiguracja lokalna
 secret/
@@ -62,3 +64,6 @@ _Old/
 # System
 Thumbs.db
 .DS_Store
+
+# Pliki użytkownika profili publikacji Visual Studio (specyficzne dla maszyny).
+*.pubxml.user

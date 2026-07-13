@@ -9,7 +9,7 @@ using ToperJarvis.Abstractions.Speech;
 using ToperJarvis.Abstractions.Tools;
 using ToperJarvis.Core.Prompting;
 using ToperJarvis.Llm;
-using ToperJarvis.Speech.Vad;
+using ToperJarvis.Speech.Endpointing;
 
 namespace ToperJarvis.Core;
 
@@ -26,17 +26,20 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     private readonly IChatClient _chat;
     private readonly SystemPromptProvider _prompt;
     private readonly IMemoryStore _memory;
+    private readonly IEndpointDetectorFactory _endpointFactory;
     private readonly ILogger<JarvisOrchestrator> _logger;
     private readonly AudioOptions _audio;
     private readonly LlmOptions _llm;
     private readonly ChatOptions _chatOptions;
     private readonly IReadOnlyDictionary<string, string> _lexicon;
+    private readonly IReadOnlyList<string> _fillerPhrases;
 
     private readonly List<ChatMessage> _history = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     private CancellationTokenSource? _turnCts;
-    private VadBuffer? _vad;
+    private IEndpointDetector? _vad;
     private bool _started;
+    private int _fillerIndex;
 
     // Push-to-talk: bufor nagrania między wciśnięciem a puszczeniem klawisza.
     private readonly List<float> _pttBuffer = new();
@@ -51,6 +54,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         SystemPromptProvider prompt,
         IMemoryStore memory,
         IEnumerable<IJarvisTool> tools,
+        IEndpointDetectorFactory endpointFactory,
         IOptions<JarvisOptions> options,
         ILogger<JarvisOrchestrator> logger)
     {
@@ -61,10 +65,12 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         _chat = chat;
         _prompt = prompt;
         _memory = memory;
+        _endpointFactory = endpointFactory;
         _logger = logger;
         _audio = options.Value.Audio;
         _llm = options.Value.Llm;
         _lexicon = options.Value.Tts.Lexicon;
+        _fillerPhrases = options.Value.Tts.FillerPhrases;
         // Mózgiem jest zdalny agent Hermes (Hektor) — to ON wywołuje narzędzia (lokalne przez MCP,
         // resztę własne). ToperJarvis nie wysyła już własnej listy narzędzi do modelu.
         _chatOptions = new ChatOptions();
@@ -74,6 +80,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
     public event EventHandler<AssistantState>? StateChanged;
     public event EventHandler<TranscriptEntry>? TranscriptAdded;
+    public event EventHandler<AssistantStreamChunk>? AssistantStreaming;
     public event EventHandler<double>? TurnCompleted;
 
     public void Start()
@@ -107,7 +114,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         if (State != AssistantState.Idle)
             return;
 
-        _vad = new VadBuffer(_audio);
+        _vad = _endpointFactory.Create();
         _capture.FrameAvailable += OnVadFrame;
         SetState(AssistantState.Listening);
     }
@@ -136,7 +143,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                 return;
             }
 
-            await ProcessTextAsync(text, CancellationToken.None);
+            await ProcessTextAsync(text, CancellationToken.None, enableFiller: true);
         }
         catch (Exception ex)
         {
@@ -197,7 +204,9 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
 
         try
         {
-            await ProcessTextAsync(text, ct);
+            // Wpisany tekst nie ma TTFT do maskowania (użytkownik widzi ekran, nie czeka na audio) —
+            // filler graliby się bez potrzeby, więc dla ścieżki tekstowej jest wyłączony.
+            await ProcessTextAsync(text, ct, enableFiller: false);
         }
         catch (Exception ex)
         {
@@ -206,7 +215,7 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
         }
     }
 
-    private async Task ProcessTextAsync(string userText, CancellationToken ct)
+    private async Task ProcessTextAsync(string userText, CancellationToken ct, bool enableFiller)
     {
         await _turnGate.WaitAsync(ct);
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -229,6 +238,28 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
             var spoke = false;
             try
             {
+                // Natychmiastowy filler maskujący TTFT: gra w tle, podczas gdy LLM generuje pierwszy
+                // token. Idzie przez ten sam kanał TTS co realne zdania, więc naturalnie się szeregują
+                // (filler zawsze wybrzmi przed pierwszym realnym zdaniem — bez nakładania mowy).
+                // Pusta lista fraz = wyłącznik funkcji. Tylko dla wypowiedzi głosowych — wpisany tekst
+                // nie ma TTFT do maskowania (zob. SubmitTextAsync).
+                // WAŻNE: enqueue RAW frazy (bez SpeechNormalizer) — CachingTextToSpeech buduje klucze
+                // cache z surowych FillerPhrases (NormalizeKey = Trim+ToLowerInvariant). Gdyby fraza
+                // przeszła przez SpeechNormalizer (leksykon/markdown), klucz runtime rozjechałby się
+                // z kluczem cache i filler byłby syntezowany na nowo za każdym razem.
+                if (enableFiller && _fillerPhrases.Count > 0)
+                {
+                    // Plain increment (nie Interlocked) — tury są w pełni serializowane przez
+                    // _turnGate, więc nie ma tu rywalizacji o _fillerIndex.
+                    var filler = _fillerPhrases[++_fillerIndex % _fillerPhrases.Count];
+                    if (!string.IsNullOrWhiteSpace(filler))
+                    {
+                        spoke = true;
+                        SetState(AssistantState.Speaking);
+                        await ttsChannel.Writer.WriteAsync(filler, token);
+                    }
+                }
+
                 await foreach (var update in _chat.GetStreamingResponseAsync(_history, _chatOptions, token))
                 {
                     var delta = update.Text;
@@ -236,6 +267,8 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                         continue;
 
                     assistant.Append(delta);
+                    // Pokaż tekst na bieżąco (równolegle z TTS) — UI sam throttluje renderowanie.
+                    AssistantStreaming?.Invoke(this, new AssistantStreamChunk(assistant.ToString(), false));
                     foreach (var sentence in accumulator.Add(delta))
                     {
                         // Normalizuj pod TTS: usuń Markdown, zastosuj leksykon wymowy. Puste pomiń.
@@ -262,12 +295,12 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                     }
                 }
 
-                // Pokaż pełną odpowiedź (surowy Markdown — UI renderuje) po wygenerowaniu.
+                // Domknij prezentację: pełny tekst (surowy Markdown — UI renderuje) i zapis do historii.
                 var full = assistant.ToString().Trim();
                 if (full.Length > 0)
                 {
                     _history.Add(new ChatMessage(ChatRole.Assistant, full));
-                    AddTranscript(TranscriptRole.Assistant, full);
+                    AssistantStreaming?.Invoke(this, new AssistantStreamChunk(full, true));
                 }
             }
             finally
@@ -306,6 +339,28 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
     {
         try { _turnCts?.Cancel(); }
         catch (ObjectDisposedException) { /* tura już zakończona */ }
+    }
+
+    /// <summary>
+    /// Czyści historię rozmowy. Najpierw przerywa bieżącą turę (by żaden wątek nie dopisywał do listy
+    /// w trakcie czyszczenia), potem kasuje historię pod bramką tury. Następna komenda doda system
+    /// prompt na nowo (zob. <see cref="EnsureSystemPrompt"/>).
+    /// </summary>
+    public void ClearContext()
+    {
+        Interrupt();
+        // Bramka tury serializuje względem trwającego przetwarzania — po jej zajęciu mamy pewność,
+        // że żaden ProcessTextAsync nie modyfikuje _history równolegle.
+        _turnGate.Wait();
+        try
+        {
+            _history.Clear();
+            _logger.LogInformation("Kontekst rozmowy wyczyszczony — historia pusta.");
+        }
+        finally
+        {
+            _turnGate.Release();
+        }
     }
 
     /// <summary>

@@ -20,6 +20,13 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ToperJarvis.Core\ToperJarvis.Core.csproj" />
     <ProjectReference Include="..\..\src\ToperJarvis.Llm\ToperJarvis.Llm.csproj" />
+    <ProjectReference Include="..\..\src\ToperJarvis.Speech\ToperJarvis.Speech.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Fixtures/mel_golden.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

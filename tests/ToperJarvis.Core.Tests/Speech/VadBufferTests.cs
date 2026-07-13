@@ -1,4 +1,5 @@
 using ToperJarvis.Abstractions.Configuration;
+using ToperJarvis.Speech.Endpointing;
 using ToperJarvis.Speech.Vad;
 
 namespace ToperJarvis.Core.Tests.Speech;
@@ -86,5 +87,12 @@ public class VadBufferTests
         // po resecie sama cisza nie domknie żadnej wypowiedzi
         for (var i = 0; i < 10; i++)
             Assert.Null(vad.Process(SilenceChunk()));
+    }
+
+    [Fact]
+    public void VadBuffer_jest_IEndpointDetector()
+    {
+        IEndpointDetector detector = new VadBuffer(Options());
+        Assert.Null(detector.Process(SilenceChunk()));
     }
 }

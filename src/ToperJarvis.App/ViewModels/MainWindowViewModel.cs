@@ -92,8 +92,14 @@ public partial class MainWindowViewModel : ViewModelBase
             });
         _orchestrator.TranscriptAdded += (_, entry) =>
             Dispatcher.UIThread.Post(() => Transcript.Add($"{Prefix(entry.Role)} {entry.Text}"));
+        _orchestrator.AssistantStreaming += (_, chunk) =>
+            Dispatcher.UIThread.Post(() => OnAssistantStreaming(chunk));
         _orchestrator.TurnCompleted += (_, ms) =>
-            Dispatcher.UIThread.Post(() => LastTurnMs = ms);
+            Dispatcher.UIThread.Post(() =>
+            {
+                LastTurnMs = ms;
+                _streamIndex = -1; // domknij bieżący dymek — następna odpowiedź zacznie nowy
+            });
 
         if (capture is not null)
             capture.FrameAvailable += OnAudioFrame;
@@ -188,8 +194,46 @@ public partial class MainWindowViewModel : ViewModelBase
         await _orchestrator.SubmitTextAsync(text);
     }
 
+    // Indeks dymka odpowiedzi aktualnie strumieniowanej (-1 = brak) i długość już wyrenderowana.
+    private int _streamIndex = -1;
+    private int _streamRenderedLen;
+
+    /// <summary>
+    /// Aktualizuje dymek odpowiedzi w trakcie generowania. Tworzy go przy pierwszym fragmencie,
+    /// potem nadpisuje — z throttlingiem (re-render Markdown jest kosztowny), ale ostatni fragment
+    /// (<see cref="AssistantStreamChunk.IsFinal"/>) zawsze aplikujemy w całości.
+    /// </summary>
+    private void OnAssistantStreaming(AssistantStreamChunk chunk)
+    {
+        var text = chunk.Text;
+        if (_streamIndex < 0)
+        {
+            Transcript.Add($"{Prefix(TranscriptRole.Assistant)} {text}");
+            _streamIndex = Transcript.Count - 1;
+            _streamRenderedLen = text.Length;
+            return;
+        }
+
+        if (!chunk.IsFinal && text.Length - _streamRenderedLen < 24)
+            return;
+
+        Transcript[_streamIndex] = $"{Prefix(TranscriptRole.Assistant)} {text}";
+        _streamRenderedLen = text.Length;
+        if (chunk.IsFinal)
+            _streamIndex = -1;
+    }
+
     /// <summary>Przerywa bieżącą turę (Esc) — anuluje myślenie/akcje/mowę.</summary>
     public void Interrupt() => _orchestrator.Interrupt();
+
+    /// <summary>Czyści kontekst rozmowy: historię wysyłaną do mózgu oraz widoczny transkrypt.</summary>
+    [RelayCommand]
+    private void ClearContext()
+    {
+        _orchestrator.ClearContext();
+        Transcript.Clear();
+        _streamIndex = -1;
+    }
 
     private static string Describe(AssistantState state) => state switch
     {
@@ -214,6 +258,7 @@ public partial class MainWindowViewModel : ViewModelBase
         public AssistantState State => AssistantState.Idle;
         public event EventHandler<AssistantState>? StateChanged { add { } remove { } }
         public event EventHandler<TranscriptEntry>? TranscriptAdded { add { } remove { } }
+        public event EventHandler<AssistantStreamChunk>? AssistantStreaming { add { } remove { } }
         public event EventHandler<double>? TurnCompleted { add { } remove { } }
         public void Start() { }
         public void Stop() { }
@@ -221,5 +266,6 @@ public partial class MainWindowViewModel : ViewModelBase
         public void BeginPushToTalk() { }
         public void EndPushToTalk() { }
         public void Interrupt() { }
+        public void ClearContext() { }
     }
 }

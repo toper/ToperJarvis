@@ -12,6 +12,10 @@ public class OpenAppToolTests
     [InlineData("example.com", "https://example.com")]         // domena → URL
     [InlineData("notepad.exe", "notepad.exe")]       // plik wykonywalny → NIE URL
     [InlineData("nieznana_apka", "nieznana_apka")]   // fallback do powłoki
+    [InlineData("teams", "msteams")]                 // dodany alias — aplikacja spoza PATH
+    [InlineData("visual studio code", "code")]       // dodany alias wieloczłonowy
+    [InlineData("menedżer zadań", "taskmgr")]        // dodany alias PL
+    [InlineData("powerpoint", "powerpnt")]           // dodany alias
     public void Resolve_mapuje_poprawnie(string input, string expected)
     {
         Assert.Equal(expected, OpenAppTool.Resolve(input));

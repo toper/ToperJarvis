@@ -40,13 +40,21 @@ $outDir = if ([System.IO.Path]::IsPathRooted($Output)) { $Output } else { Join-P
 
 Write-Host "Publikuję ToperJarvis ($Configuration / $Runtime) → $outDir" -ForegroundColor Cyan
 
+# Czyszczenie katalogu docelowego — kompletny, świeży build (spójne z profilem VS: DeleteExistingFiles).
+if (Test-Path $outDir) {
+    Write-Host "Czyszczę $outDir ..." -ForegroundColor DarkGray
+    Remove-Item (Join-Path $outDir "*") -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Uwaga: NIE używamy PublishSingleFile — aplikacja ma natywne zależności (Whisper.net, ONNX Runtime,
+# SkiaSharp, OpenCvSharp), których loadery nie znajdują wypakowanych DLL przy single-file. Multi-file
+# self-contained kładzie natywne biblioteki w runtimes/<rid>/native i wszystko się ładuje poprawnie.
 $publishArgs = @(
     "publish", $project,
     "-c", $Configuration,
     "-r", $Runtime,
     "--self-contained", "true",
-    "-p:PublishSingleFile=true",
-    "-p:IncludeNativeLibrariesForSelfExtract=true",
+    "-p:PublishSingleFile=false",
     "-o", $outDir
 )
 if ($ReadyToRun) { $publishArgs += "-p:PublishReadyToRun=true" }
@@ -54,17 +62,9 @@ if ($ReadyToRun) { $publishArgs += "-p:PublishReadyToRun=true" }
 & dotnet @publishArgs
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish nie powiódł się (kod $LASTEXITCODE)." }
 
-# appsettings.Local.json to konfiguracja deweloperska (m.in. absolutne ścieżki) — nie dystrybuujemy.
-Remove-Item (Join-Path $outDir "appsettings.Local.json") -Force -ErrorAction SilentlyContinue
-
-# Modele Whisper/Piper są poza repo; kopiujemy assets/ obok exe, jeśli istnieją lokalnie.
-$assetsSrc = Join-Path $repoRoot "assets"
-if (Test-Path $assetsSrc) {
-    Copy-Item $assetsSrc (Join-Path $outDir "assets") -Recurse -Force
-    Write-Host "Skopiowano assets/ obok pliku wykonywalnego." -ForegroundColor Green
-} else {
-    Write-Warning "Brak katalogu assets/ — dostarcz modele Whisper/Piper ręcznie (zob. assets/SETUP.md)."
-}
+# Kopiowanie assets/ obok exe robi target MSBuild "PrepareCompletePublish" (ToperJarvis.App.csproj),
+# wspólny dla publikacji z VS i CLI. appsettings.Local.json (sekrety) jest dołączany do publikacji
+# przez CopyToOutputDirectory — build lokalny. Przy dystrybucji na inną maszynę usuń go stamtąd.
 
 $exe = Join-Path $outDir "ToperJarvis.App.exe"
 Write-Host ""

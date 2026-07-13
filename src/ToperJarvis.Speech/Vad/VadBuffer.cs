@@ -1,4 +1,5 @@
 using ToperJarvis.Abstractions.Configuration;
+using ToperJarvis.Speech.Endpointing;
 
 namespace ToperJarvis.Speech.Vad;
 
@@ -11,7 +12,7 @@ namespace ToperJarvis.Speech.Vad;
 /// <item>mowa kończy się dopiero, gdy RMS &lt; <c>SilenceThreshold</c> przez <c>SilenceSeconds</c>.</item>
 /// </list>
 /// </summary>
-public sealed class VadBuffer
+public sealed class VadBuffer : IEndpointDetector
 {
     private readonly double _speechThresh;
     private readonly double _silenceThresh;
