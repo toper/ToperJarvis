@@ -46,13 +46,15 @@ if (Test-Path $outDir) {
     Remove-Item (Join-Path $outDir "*") -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# Uwaga: NIE używamy PublishSingleFile — aplikacja ma natywne zależności (Whisper.net, ONNX Runtime,
+# SkiaSharp, OpenCvSharp), których loadery nie znajdują wypakowanych DLL przy single-file. Multi-file
+# self-contained kładzie natywne biblioteki w runtimes/<rid>/native i wszystko się ładuje poprawnie.
 $publishArgs = @(
     "publish", $project,
     "-c", $Configuration,
     "-r", $Runtime,
     "--self-contained", "true",
-    "-p:PublishSingleFile=true",
-    "-p:IncludeNativeLibrariesForSelfExtract=true",
+    "-p:PublishSingleFile=false",
     "-o", $outDir
 )
 if ($ReadyToRun) { $publishArgs += "-p:PublishReadyToRun=true" }
