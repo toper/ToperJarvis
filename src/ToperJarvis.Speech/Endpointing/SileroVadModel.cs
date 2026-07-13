@@ -30,13 +30,23 @@ public sealed class SileroVadModel : IDisposable
     private InferenceSession? _session;
     private bool _missingModelWarned;
 
-    private float[] _context = new float[ContextSamples];
+    private readonly float[] _context = new float[ContextSamples];
     private float[] _state = new float[2 * 128];
+
+    // IsSpeech jest wołane ~31x/s na wątku audio — poniższe bufory/tensory są utworzone raz
+    // i nadpisywane przy każdym wywołaniu (zamiast alokować od nowa), żeby zejść z GC pressure
+    // na tym hot-pathcie. _state NIE jest reużywane (patrz komentarz w IsSpeech) — to jedyna
+    // alokacja, która musi zostać, bo ORT-owy bufor stateN nie może być aliasowany po zwolnieniu
+    // `results` (using) — musimy skopiować dane, nie referencję.
+    private readonly float[] _inputBuffer = new float[ContextSamples + FrameSamples];
+    private readonly DenseTensor<float> _inputTensor;
+    private readonly DenseTensor<long> _srTensor = new(new[] { SampleRate }, Array.Empty<int>());
 
     public SileroVadModel(string modelPath, ILogger<SileroVadModel> logger)
     {
         _modelPath = modelPath;
         _logger = logger;
+        _inputTensor = new DenseTensor<float>(_inputBuffer, new[] { 1, _inputBuffer.Length });
     }
 
     /// <summary>
@@ -50,9 +60,52 @@ public sealed class SileroVadModel : IDisposable
         if (session is null)
             return 1.0f;
 
-        // Doklej ostatnie 64 próbki poprzedniego wywołania przed bieżącą ramką → 576.
+        // Hot-path w produkcji zawsze woła z ramką dokładnie FrameSamples (patrz
+        // NeuralEndpointDetector). Publiczne API dopuszcza dowolną długość, więc dla
+        // nietypowego rozmiaru wracamy do bezpiecznej, alokującej ścieżki zamiast ryzykować
+        // przepełnienie/niedopasowanie reużywanego bufora.
+        if (frame.Length != FrameSamples)
+            return IsSpeechSlow(frame, session);
+
+        // Nadpisz reużywany bufor wejściowy (kontekst + bieżąca ramka) zamiast alokować za
+        // każdym razem — IsSpeech jest wołane ~31x/s na wątku audio.
+        _context.CopyTo(_inputBuffer, 0);
+        frame.CopyTo(_inputBuffer.AsSpan(ContextSamples));
+
+        // _state zmienia się co wywołanie (nowa zawartość z ORT), więc stateTensor trzeba
+        // zbudować na nowo — samego bufora `_state` NIE reużywamy jako referencji do wyniku ORT
+        // (patrz komentarz przy polu _state), ale opakowujący go DenseTensor jest tani (bez alokacji
+        // danych, tylko wrapper).
+        var stateTensor = new DenseTensor<float>(_state, new[] { 2, 1, 128 });
+
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor(InputName, _inputTensor),
+            NamedOnnxValue.CreateFromTensor(StateName, stateTensor),
+            NamedOnnxValue.CreateFromTensor(SrName, _srTensor),
+        };
+
+        using var results = session.Run(inputs, new[] { OutputName, StateOutputName });
+        var output = results.First(r => r.Name == OutputName).AsTensor<float>();
+        var newState = results.First(r => r.Name == StateOutputName).AsTensor<float>();
+
+        // Fresh copy: ORT jest właścicielem bufora newState i zwalnia go po Dispose `results`
+        // (koniec using powyżej) — NIE wolno aliasować tej pamięci, trzeba ją skopiować.
+        _state = newState.ToArray();
+
+        // Zapamiętaj ostatnie 64 próbki bieżącego wejścia jako kontekst na następne wywołanie
+        // (kopiujemy w miejscu do stałego bufora _context zamiast alokować nową tablicę).
+        Array.Copy(_inputBuffer, _inputBuffer.Length - ContextSamples, _context, 0, ContextSamples);
+
+        return output[0, 0];
+    }
+
+    /// <summary>Ścieżka zapasowa dla ramek o długości innej niż <see cref="FrameSamples"/> — alokuje,
+    /// ale zachowuje identyczną logikę jak oryginalna (pre-optymalizacja) implementacja.</summary>
+    private float IsSpeechSlow(ReadOnlySpan<float> frame, InferenceSession session)
+    {
         var input = new float[ContextSamples + frame.Length];
-        _context.CopyTo(input, 0);
+        _context.AsSpan().CopyTo(input);
         frame.CopyTo(input.AsSpan(ContextSamples));
 
         var inputTensor = new DenseTensor<float>(input, new[] { 1, input.Length });
@@ -72,8 +125,8 @@ public sealed class SileroVadModel : IDisposable
 
         _state = newState.ToArray();
 
-        // Zapamiętaj ostatnie 64 próbki bieżącego wejścia jako kontekst na następne wywołanie.
-        _context = input[^ContextSamples..];
+        var tail = input[^ContextSamples..];
+        tail.CopyTo(_context, 0);
 
         return output[0, 0];
     }
@@ -81,7 +134,7 @@ public sealed class SileroVadModel : IDisposable
     /// <summary>Zeruje stan LSTM oraz rolling-context. Wywołuj na starcie każdej wypowiedzi/strumienia.</summary>
     public void Reset()
     {
-        _context = new float[ContextSamples];
+        Array.Clear(_context);
         _state = new float[2 * 128];
     }
 

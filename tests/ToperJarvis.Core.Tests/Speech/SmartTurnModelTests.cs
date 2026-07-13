@@ -25,5 +25,8 @@ public class SmartTurnModelTests
         using var m = new SmartTurnModel(ModelPath, NullLogger<SmartTurnModel>.Instance);
         var prob = m.PredictCompletion(new float[16000]); // 1 s ciszy
         Assert.InRange(prob, 0f, 1f);
+        // Cisza = tura skończona — model powinien zwrócić WYSOKIE prawdopodobieństwo konca
+        // (realnie ~0.979), nie tylko dowolną wartość z [0,1].
+        Assert.True(prob > 0.5f, $"Oczekiwano wysokiego prawdopodobieństwa konca tury dla ciszy, otrzymano {prob}.");
     }
 }

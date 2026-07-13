@@ -54,6 +54,11 @@ public sealed class CachingTextToSpeech : ITextToSpeech
         }
         else
         {
+            // Brak double-checked locking celowo: dwa równoległe cache-missy dla tego samego klucza
+            // mogą oba zsyntezować i ostatni zapis wygrywa (nadpisze _cache[key]). Akceptowalne —
+            // tury są serializowane przez JarvisOrchestrator (_turnGate), więc w praktyce nie ma tu
+            // rywalizacji; nie warto komplikować kodu blokadą per-klucz dla scenariusza, który się
+            // nie zdarza w produkcji.
             pcm = await _synthesizer.SynthesizeToPcmAsync(text, ct);
             if (cacheable && pcm.Length > 0)
                 _cache[key] = pcm;

@@ -34,6 +34,12 @@ public sealed class NeuralEndpointDetector : IEndpointDetector
 
     private readonly List<float> _carry = new();
     private readonly List<float> _buffer = new();
+
+    // Reużywany bufor pojedynczej ramki 512 próbek — zamiast alokować nową tablicę na każdą ramkę
+    // w pętli Process (wywoływane wielokrotnie na sekundę audio), kopiujemy w miejscu i przekazujemy
+    // jako Memory do sondy VAD. Bezpieczne, bo sonda (_isSpeech) zdąża zużyć dane synchronicznie przed
+    // kolejną iteracją pętli, która nadpisze bufor.
+    private readonly float[] _frameBuf = new float[FrameSamples];
     private bool _inSpeech;
     private int _silenceCount;
 
@@ -64,7 +70,8 @@ public sealed class NeuralEndpointDetector : IEndpointDetector
         var offset = 0;
         while (_carry.Count - offset >= FrameSamples)
         {
-            var frame = _carry.GetRange(offset, FrameSamples).ToArray();
+            // Kopiuj do reużywanego bufora zamiast alokować nową tablicę na każdą ramkę.
+            _carry.CopyTo(offset, _frameBuf, 0, FrameSamples);
             offset += FrameSamples;
 
             // Zachowaj niezużyty ogon bieżącego chunku (próbki PO tej ramce) ZANIM ProcessFrame
@@ -74,7 +81,7 @@ public sealed class NeuralEndpointDetector : IEndpointDetector
                 ? _carry.GetRange(offset, _carry.Count - offset).ToArray()
                 : Array.Empty<float>();
 
-            var result = ProcessFrame(frame);
+            var result = ProcessFrame(_frameBuf);
             if (result is not null)
             {
                 // ProcessFrame wywołał Reset() (koniec tury) — _carry jest wyczyszczony.

@@ -249,7 +249,9 @@ public sealed class JarvisOrchestrator : IAssistantOrchestrator, IDisposable
                 // z kluczem cache i filler byłby syntezowany na nowo za każdym razem.
                 if (enableFiller && _fillerPhrases.Count > 0)
                 {
-                    var filler = _fillerPhrases[Interlocked.Increment(ref _fillerIndex) % _fillerPhrases.Count];
+                    // Plain increment (nie Interlocked) — tury są w pełni serializowane przez
+                    // _turnGate, więc nie ma tu rywalizacji o _fillerIndex.
+                    var filler = _fillerPhrases[++_fillerIndex % _fillerPhrases.Count];
                     if (!string.IsNullOrWhiteSpace(filler))
                     {
                         spoke = true;
