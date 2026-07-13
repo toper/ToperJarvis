@@ -60,8 +60,9 @@ if ($ReadyToRun) { $publishArgs += "-p:PublishReadyToRun=true" }
 & dotnet @publishArgs
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish nie powiódł się (kod $LASTEXITCODE)." }
 
-# Kopiowanie assets/ obok exe oraz usunięcie deweloperskiego appsettings.Local.json robi target
-# MSBuild "PrepareCompletePublish" (ToperJarvis.App.csproj) — wspólny dla publikacji z VS i CLI.
+# Kopiowanie assets/ obok exe robi target MSBuild "PrepareCompletePublish" (ToperJarvis.App.csproj),
+# wspólny dla publikacji z VS i CLI. appsettings.Local.json (sekrety) jest dołączany do publikacji
+# przez CopyToOutputDirectory — build lokalny. Przy dystrybucji na inną maszynę usuń go stamtąd.
 
 $exe = Join-Path $outDir "ToperJarvis.App.exe"
 Write-Host ""
